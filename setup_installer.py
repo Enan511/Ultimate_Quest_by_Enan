@@ -1,3 +1,15 @@
+"""
+setup_installer.py - Standalone PySide6 Setup Installer for Ultimate Quest.
+
+This script implements a multi-page setup wizard for Windows:
+1. Target Directory Selection: Allows users to choose any installation folder.
+   Enforces storing files inside a dedicated 'UEQuest by E' subfolder.
+2. Shortcut Preference: Checkboxes (enabled by default) to create Desktop
+   and Start Menu shortcuts pointing to Ultimate_Quest.exe.
+3. Asynchronous Extraction: Copies bundled application files with a progress bar.
+4. Completion: Option to launch Ultimate Quest immediately upon finishing.
+"""
+
 import sys
 import os
 import shutil

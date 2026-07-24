@@ -1,3 +1,10 @@
+"""
+build_setup.py - Packaging script for the Setup Installer.
+
+Compiles setup_installer.py into a single, standalone executable (Ultimate_Quest_Setup.exe),
+bundling Ultimate_Quest_Folder and icon assets.
+"""
+
 import sys
 import os
 import subprocess

@@ -1,3 +1,13 @@
+"""
+uninstaller.py - Standalone PySide6 Uninstaller for Ultimate Quest (UEQ Uninstaller.exe).
+
+This script resides inside the 'UEQuest by E' installation directory:
+1. Prompts the user with a confirmation window to uninstall Ultimate Quest.
+2. Removes Desktop and Start Menu shortcuts created during installation.
+3. Spawns a silent windowless C# binary (deleter.exe) to wait for process exit,
+   delete the parent 'UEQuest by E' folder and all files inside, and self-delete.
+"""
+
 import sys
 import os
 import shutil

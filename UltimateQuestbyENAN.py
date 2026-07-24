@@ -3,11 +3,14 @@ import os
 import subprocess
 import shutil
 
-# False = Folder build with instant launch (recommended, 100% VirusTotal safe)
+# Build configuration mode:
+# BUILD_SINGLE_FILE = False compiles the app as a folder distribution (--onedir)
+# which provides instant application startup and clean file structure.
 BUILD_SINGLE_FILE = False
 
 RCEDIT_PATH = "rcedit.exe"
 
+# Local source icon file locations for compilation
 MAIN_ICON_SRC = r"D:\ML practice\Icons\UQ.ico"
 STEAM_ICON_SRC = r"D:\ML practice\Icons\Steam.ico"
 TIMER_ICONS = [
