@@ -110,6 +110,19 @@ def main():
         if os.path.exists(out_dir):
             shutil.rmtree(out_dir)
         shutil.move(os.path.join("dist", "Ultimate_Quest"), out_dir)
+
+        if os.path.exists("uninstaller.py"):
+            print("Step 6b: Compiling UEQ Uninstaller.exe...")
+            run_pyinstaller(
+                [sys.executable, "-m", "PyInstaller", "--noconfirm", "--onefile", "--windowed",
+                 "--name", "UEQ Uninstaller"] + main_icon_arg + exclusions + ["uninstaller.py"],
+                "Uninstaller compilation"
+            )
+            uninst_dist = os.path.join("dist", "UEQ Uninstaller.exe")
+            if os.path.exists(uninst_dist):
+                shutil.copy(uninst_dist, os.path.join(out_dir, "UEQ Uninstaller.exe"))
+                print("  Bundled UEQ Uninstaller.exe into Ultimate_Quest_Folder.")
+
         print(f"\nSUCCESS! Your app is inside the '{out_dir}' folder.")
 
 
