@@ -1,12 +1,12 @@
 """
-setup_installer_light.py - Lightweight Standalone PySide6 Setup Installer for Ultimate Quest.
+setup_installer_light.py - Solid LZMA2 Compact Setup Installer for Ultimate Quest.
 
-This script implements a compact setup wizard for Windows without the uninstaller component:
+This script extracts a high-compression LZMA2 payload (payload.tar.xz) at runtime:
 1. Target Directory Selection: Allows users to choose any installation folder.
    Enforces storing files inside a dedicated 'UEQuest by E' subfolder.
 2. Shortcut Preference: Checkboxes (enabled by default) to create Desktop
    and Start Menu shortcuts pointing to Ultimate_Quest.exe.
-3. Asynchronous Extraction: Copies bundled application files with a progress bar.
+3. Solid LZMA2 Extraction: Decompresses payload.tar.xz with a real-time progress bar.
 4. Completion: Option to launch Ultimate Quest immediately upon finishing.
 """
 
@@ -16,96 +16,15 @@ import shutil
 import subprocess
 import threading
 import time
+import tarfile
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
-
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QCheckBox, QLabel, QLineEdit, QProgressBar, QFileDialog,
-    QStackedWidget, QFrame, QMessageBox
-)
-from PySide6.QtCore import Qt, Signal, Slot, QObject, QThread
-from PySide6.QtGui import QIcon
 
 try:
     import winreg
 except ImportError:
     winreg = None
-
-
-DARK_THEME = '''
-QWidget {
-    background-color: #121212;
-    color: #ffffff;
-    font-family: "Segoe UI";
-    font-size: 13px;
-}
-QFrame#card {
-    background-color: #1a1a1a;
-    border-radius: 8px;
-    border: 1px solid #2a2a2a;
-}
-QLineEdit {
-    background-color: #222222;
-    border: 1px solid #333333;
-    border-radius: 4px;
-    padding: 8px;
-    color: #ffffff;
-}
-QLineEdit:focus {
-    border: 1px solid #00ffcc;
-}
-QPushButton {
-    background-color: #1f538d;
-    border: none;
-    border-radius: 4px;
-    padding: 9px 18px;
-    color: #ffffff;
-    font-weight: bold;
-}
-QPushButton:hover {
-    background-color: #296cbd;
-}
-QPushButton:pressed {
-    background-color: #17406a;
-}
-QPushButton#install_btn {
-    background-color: #1f8b4c;
-    font-size: 14px;
-}
-QPushButton#install_btn:hover {
-    background-color: #28a85a;
-}
-QPushButton#install_btn:pressed {
-    background-color: #176b3a;
-}
-QCheckBox {
-    spacing: 8px;
-    font-size: 13px;
-}
-QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    border-radius: 3px;
-    border: 1px solid #444444;
-    background-color: #222222;
-}
-QCheckBox::indicator:checked {
-    background-color: #00ffcc;
-    border: 1px solid #00ffcc;
-}
-QProgressBar {
-    background-color: #222222;
-    border: 1px solid #333333;
-    border-radius: 5px;
-    text-align: center;
-    color: #ffffff;
-    font-weight: bold;
-}
-QProgressBar::chunk {
-    background-color: #00ffcc;
-    border-radius: 4px;
-}
-'''
 
 
 def resource_path(relative_path):
@@ -183,261 +102,169 @@ $Shortcut.WorkingDirectory = '{work_dir}'
         return False
 
 
-class InstallWorkerSignals(QObject):
-    progress = Signal(int, str)
-    finished = Signal(bool, str)
+class SetupInstallerLightTk:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Ultimate Quest Light Setup")
+        self.root.geometry("620x460")
+        self.root.resizable(False, False)
+        self.root.configure(bg="#121212")
 
-
-class InstallWorker(QThread):
-    def __init__(self, target_dir, create_desktop, create_start_menu):
-        super().__init__()
-        self.target_dir = target_dir
-        self.create_desktop = create_desktop
-        self.create_start_menu = create_start_menu
-        self.signals = InstallWorkerSignals()
-
-    def run(self):
-        try:
-            self.signals.progress.emit(5, "Preparing installation folder...")
-            os.makedirs(self.target_dir, exist_ok=True)
-
-            source_folder = resource_path("Ultimate_Quest_Folder")
-            if not os.path.exists(source_folder):
-                source_folder = os.path.abspath("Ultimate_Quest_Folder")
-
-            if not os.path.exists(source_folder):
-                self.signals.finished.emit(False, "Bundled Ultimate_Quest_Folder not found!")
-                return
-
-            all_files = []
-            for root, dirs, files in os.walk(source_folder):
-                for f in files:
-                    # Skip uninstaller file in light setup
-                    if f.lower() == "ueq uninstaller.exe":
-                        continue
-                    all_files.append(os.path.join(root, f))
-
-            total_files = len(all_files)
-            if total_files == 0:
-                self.signals.finished.emit(False, "No files found to install.")
-                return
-
-            self.signals.progress.emit(10, f"Copying {total_files} files...")
-
-            copied_count = 0
-            for src_file in all_files:
-                rel_path = os.path.relpath(src_file, source_folder)
-                dst_file = os.path.join(self.target_dir, rel_path)
-
-                os.makedirs(os.path.dirname(dst_file), exist_ok=True)
-                shutil.copy2(src_file, dst_file)
-
-                copied_count += 1
-                percent = int(10 + (copied_count / total_files) * 75)
-                self.signals.progress.emit(percent, f"Extracting: {rel_path}")
-                time.sleep(0.01)
-
-            main_exe = os.path.join(self.target_dir, "Ultimate_Quest.exe")
-            ico_src = resource_path("icons/UQ.ico")
-            ico_dst = os.path.join(self.target_dir, "app_icon.ico")
-
-            if os.path.exists(ico_src):
-                shutil.copy2(ico_src, ico_dst)
-            else:
-                ico_dst = main_exe
-
-            self.signals.progress.emit(90, "Creating Windows shortcuts...")
-
-            if self.create_desktop:
-                desktop_dir = get_desktop_path()
-                shortcut_path = os.path.join(desktop_dir, "Ultimate Quest.lnk")
-                create_shortcut_windows(main_exe, shortcut_path, ico_dst)
-
-            if self.create_start_menu:
-                start_menu_dir = get_start_menu_path()
-                if start_menu_dir:
-                    os.makedirs(start_menu_dir, exist_ok=True)
-                    shortcut_path = os.path.join(start_menu_dir, "Ultimate Quest.lnk")
-                    create_shortcut_windows(main_exe, shortcut_path, ico_dst)
-
-            self.signals.progress.emit(100, "Installation Complete!")
-            self.signals.finished.emit(True, "Installation completed successfully!")
-        except Exception as e:
-            self.signals.finished.emit(False, f"Installation error: {str(e)}")
-
-
-class SetupInstallerLightApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Ultimate Quest Light Setup")
-        self.resize(650, 470)
-        self.setMinimumSize(600, 440)
-
-        app_icon = resource_path("icons/UQ.ico")
-        if os.path.exists(app_icon):
-            self.setWindowIcon(QIcon(app_icon))
+        icon_path = resource_path("icons/UQ.ico")
+        if os.path.exists(icon_path):
+            try:
+                self.root.iconbitmap(icon_path)
+            except Exception:
+                pass
 
         self.installed_dir = ""
-        self.setup_ui()
 
-    def setup_ui(self):
-        central = QWidget()
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(25, 25, 25, 25)
+        # Style configuration
+        self.style = ttk.Style()
+        self.style.theme_use("clam")
+        self.style.configure("TProgressbar", thickness=22, troughcolor="#222222", background="#00ffcc")
 
-        self.stacked = QStackedWidget()
+        self.container = tk.Frame(self.root, bg="#121212")
+        self.container.pack(fill="both", expand=True, padx=25, pady=25)
 
-        # ── Page 0: Directory Selection & Options ──
-        page0 = QWidget()
-        p0_layout = QVBoxLayout(page0)
-        p0_layout.setContentsMargins(0, 0, 0, 0)
-        p0_layout.setSpacing(15)
+        self.page_frame = None
+        self.show_page_select()
 
-        title = QLabel("Ultimate Quest Light Setup Wizard")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #00ffcc;")
-        p0_layout.addWidget(title)
+    def clear_page(self):
+        if self.page_frame:
+            self.page_frame.destroy()
+        self.page_frame = tk.Frame(self.container, bg="#121212")
+        self.page_frame.pack(fill="both", expand=True)
 
-        subtitle = QLabel("Select installation folder and shortcut preferences:")
-        subtitle.setStyleSheet("font-size: 13px; color: #cccccc;")
-        p0_layout.addWidget(subtitle)
+    def show_page_select(self):
+        self.clear_page()
 
-        card = QFrame()
-        card.setObjectName("card")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 20, 20, 20)
-        card_layout.setSpacing(12)
+        lbl_title = tk.Label(
+            self.page_frame,
+            text="Ultimate Quest Light Setup Wizard",
+            font=("Segoe UI", 18, "bold"),
+            fg="#00ffcc",
+            bg="#121212"
+        )
+        lbl_title.pack(anchor="w", pady=(0, 5))
 
-        lbl_dir = QLabel("Destination Folder:")
-        lbl_dir.setStyleSheet("font-weight: bold; color: #ffffff;")
-        card_layout.addWidget(lbl_dir)
+        lbl_sub = tk.Label(
+            self.page_frame,
+            text="Select installation folder and shortcut preferences:",
+            font=("Segoe UI", 10),
+            fg="#cccccc",
+            bg="#121212"
+        )
+        lbl_sub.pack(anchor="w", pady=(0, 15))
 
-        dir_row = QHBoxLayout()
+        card = tk.Frame(self.page_frame, bg="#1a1a1a", highlightbackground="#2a2a2a", highlightthickness=1)
+        card.pack(fill="x", pady=10, ipady=15, ipadx=15)
+
+        lbl_dir = tk.Label(card, text="Destination Folder:", font=("Segoe UI", 10, "bold"), fg="#ffffff", bg="#1a1a1a")
+        lbl_dir.pack(anchor="w", padx=15, pady=(10, 5))
+
+        dir_row = tk.Frame(card, bg="#1a1a1a")
+        dir_row.pack(fill="x", padx=15, pady=5)
+
         default_base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
         default_dir = os.path.join(default_base, "UEQuest by E")
 
-        self.dir_entry = QLineEdit(default_dir)
-        dir_row.addWidget(self.dir_entry)
+        self.ent_dir = tk.Entry(
+            dir_row,
+            font=("Segoe UI", 10),
+            bg="#222222",
+            fg="#ffffff",
+            insertbackground="#ffffff",
+            relief="flat",
+            highlightbackground="#333333",
+            highlightthickness=1
+        )
+        self.ent_dir.insert(0, default_dir)
+        self.ent_dir.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 10))
 
-        self.browse_btn = QPushButton("Browse...")
-        self.browse_btn.clicked.connect(self.browse_folder)
-        dir_row.addWidget(self.browse_btn)
+        btn_browse = tk.Button(
+            dir_row,
+            text="Browse...",
+            font=("Segoe UI", 9, "bold"),
+            bg="#1f538d",
+            fg="#ffffff",
+            activebackground="#296cbd",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=12,
+            pady=4,
+            command=self.browse_folder
+        )
+        btn_browse.pack(side="right")
 
-        card_layout.addLayout(dir_row)
+        lbl_note = tk.Label(
+            card,
+            text="Files will be installed inside the 'UEQuest by E' folder.",
+            font=("Segoe UI", 8),
+            fg="#888888",
+            bg="#1a1a1a"
+        )
+        lbl_note.pack(anchor="w", padx=15, pady=(2, 10))
 
-        sub_note = QLabel("Files will be installed inside the 'UEQuest by E' folder.")
-        sub_note.setStyleSheet("font-size: 11px; color: #888888;")
-        card_layout.addWidget(sub_note)
+        self.var_desktop = tk.BooleanVar(value=True)
+        chk_desktop = tk.Checkbutton(
+            card,
+            text="Create Desktop Shortcut ('Ultimate Quest' on homescreen)",
+            variable=self.var_desktop,
+            font=("Segoe UI", 10),
+            fg="#ffffff",
+            bg="#1a1a1a",
+            selectcolor="#222222",
+            activebackground="#1a1a1a",
+            activeforeground="#ffffff"
+        )
+        chk_desktop.pack(anchor="w", padx=15, pady=3)
 
-        card_layout.addSpacing(10)
+        self.var_start_menu = tk.BooleanVar(value=True)
+        chk_start = tk.Checkbutton(
+            card,
+            text="Create Start Menu Shortcut",
+            variable=self.var_start_menu,
+            font=("Segoe UI", 10),
+            fg="#ffffff",
+            bg="#1a1a1a",
+            selectcolor="#222222",
+            activebackground="#1a1a1a",
+            activeforeground="#ffffff"
+        )
+        chk_start.pack(anchor="w", padx=15, pady=3)
 
-        self.chk_desktop = QCheckBox("Create Desktop Shortcut ('Ultimate Quest' on homescreen)")
-        self.chk_desktop.setChecked(True)
-        card_layout.addWidget(self.chk_desktop)
+        btn_row = tk.Frame(self.page_frame, bg="#121212")
+        btn_row.pack(fill="x", side="bottom", pady=10)
 
-        self.chk_start_menu = QCheckBox("Create Start Menu Shortcut")
-        self.chk_start_menu.setChecked(True)
-        card_layout.addWidget(self.chk_start_menu)
-
-        p0_layout.addWidget(card)
-        p0_layout.addStretch()
-
-        p0_btn_row = QHBoxLayout()
-        p0_btn_row.addStretch()
-        self.install_btn = QPushButton("Install Now")
-        self.install_btn.setObjectName("install_btn")
-        self.install_btn.setMinimumWidth(140)
-        self.install_btn.setFixedHeight(40)
-        self.install_btn.clicked.connect(self.start_installation)
-        p0_btn_row.addWidget(self.install_btn)
-        p0_layout.addLayout(p0_btn_row)
-
-        self.stacked.addWidget(page0)
-
-        # ── Page 1: Installation Progress ──
-        page1 = QWidget()
-        p1_layout = QVBoxLayout(page1)
-        p1_layout.setContentsMargins(0, 0, 0, 0)
-        p1_layout.setSpacing(20)
-
-        p1_title = QLabel("Installing Ultimate Quest...")
-        p1_title.setStyleSheet("font-size: 20px; font-weight: bold; color: #00ffcc;")
-        p1_layout.addWidget(p1_title)
-
-        p1_card = QFrame()
-        p1_card.setObjectName("card")
-        p1_card_layout = QVBoxLayout(p1_card)
-        p1_card_layout.setContentsMargins(25, 30, 25, 30)
-        p1_card_layout.setSpacing(15)
-
-        self.lbl_status = QLabel("Extracting files...")
-        self.lbl_status.setStyleSheet("font-size: 13px; color: #ffffff;")
-        p1_card_layout.addWidget(self.lbl_status)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(26)
-        self.progress_bar.setValue(0)
-        p1_card_layout.addWidget(self.progress_bar)
-
-        p1_layout.addWidget(p1_card)
-        p1_layout.addStretch()
-
-        self.stacked.addWidget(page1)
-
-        # ── Page 2: Completion Page ──
-        page2 = QWidget()
-        p2_layout = QVBoxLayout(page2)
-        p2_layout.setContentsMargins(0, 0, 0, 0)
-        p2_layout.setSpacing(20)
-
-        p2_title = QLabel("🟢 Installation Complete!")
-        p2_title.setStyleSheet("font-size: 22px; font-weight: bold; color: #00ffcc;")
-        p2_layout.addWidget(p2_title)
-
-        p2_card = QFrame()
-        p2_card.setObjectName("card")
-        p2_card_layout = QVBoxLayout(p2_card)
-        p2_card_layout.setContentsMargins(25, 25, 25, 25)
-        p2_card_layout.setSpacing(15)
-
-        self.lbl_installed_path = QLabel("Ultimate Quest has been installed to:")
-        self.lbl_installed_path.setWordWrap(True)
-        self.lbl_installed_path.setStyleSheet("font-size: 13px; color: #cccccc;")
-        p2_card_layout.addWidget(self.lbl_installed_path)
-
-        self.chk_launch = QCheckBox("Launch Ultimate Quest now")
-        self.chk_launch.setChecked(True)
-        p2_card_layout.addWidget(self.chk_launch)
-
-        p2_layout.addWidget(p2_card)
-        p2_layout.addStretch()
-
-        p2_btn_row = QHBoxLayout()
-        p2_btn_row.addStretch()
-        self.finish_btn = QPushButton("Finish")
-        self.finish_btn.setObjectName("install_btn")
-        self.finish_btn.setMinimumWidth(140)
-        self.finish_btn.setFixedHeight(40)
-        self.finish_btn.clicked.connect(self.finish_action)
-        p2_btn_row.addWidget(self.finish_btn)
-        p2_layout.addLayout(p2_btn_row)
-
-        self.stacked.addWidget(page2)
-
-        layout.addWidget(self.stacked)
-        self.setCentralWidget(central)
+        btn_install = tk.Button(
+            btn_row,
+            text="Install Now",
+            font=("Segoe UI", 11, "bold"),
+            bg="#1f8b4c",
+            fg="#ffffff",
+            activebackground="#28a85a",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=25,
+            pady=6,
+            command=self.start_installation
+        )
+        btn_install.pack(side="right")
 
     def browse_folder(self):
-        chosen = QFileDialog.getExistingDirectory(self, "Select Installation Directory")
+        chosen = filedialog.askdirectory(title="Select Installation Directory")
         if chosen:
             chosen_path = Path(chosen)
             if chosen_path.name.lower() != "uequest by e":
                 chosen_path = chosen_path / "UEQuest by E"
-            self.dir_entry.setText(str(chosen_path))
+            self.ent_dir.delete(0, tk.END)
+            self.ent_dir.insert(0, str(chosen_path))
 
     def start_installation(self):
-        raw_dir = self.dir_entry.text().strip()
+        raw_dir = self.ent_dir.get().strip()
         if not raw_dir:
-            QMessageBox.warning(self, "Invalid Path", "Please select a valid installation folder.")
+            messagebox.showwarning("Invalid Path", "Please select a valid installation folder.")
             return
 
         target_path = Path(raw_dir)
@@ -445,47 +272,184 @@ class SetupInstallerLightApp(QMainWindow):
             target_path = target_path / "UEQuest by E"
 
         self.installed_dir = str(target_path)
-        self.stacked.setCurrentIndex(1)
+        self.show_page_progress()
 
-        self.worker = InstallWorker(
-            self.installed_dir,
-            self.chk_desktop.isChecked(),
-            self.chk_start_menu.isChecked()
+        threading.Thread(target=self.run_install_thread, daemon=True).start()
+
+    def show_page_progress(self):
+        self.clear_page()
+
+        lbl_title = tk.Label(
+            self.page_frame,
+            text="Installing Ultimate Quest...",
+            font=("Segoe UI", 18, "bold"),
+            fg="#00ffcc",
+            bg="#121212"
         )
-        self.worker.signals.progress.connect(self.on_progress)
-        self.worker.signals.finished.connect(self.on_finished)
-        self.worker.start()
+        lbl_title.pack(anchor="w", pady=(0, 15))
 
-    @Slot(int, str)
-    def on_progress(self, percent, message):
-        self.progress_bar.setValue(percent)
-        self.lbl_status.setText(message)
+        card = tk.Frame(self.page_frame, bg="#1a1a1a", highlightbackground="#2a2a2a", highlightthickness=1)
+        card.pack(fill="x", pady=20, ipady=25, ipadx=20)
 
-    @Slot(bool, str)
-    def on_finished(self, success, message):
-        if success:
-            self.lbl_installed_path.setText(
-                f"Ultimate Quest has been successfully installed to:\n\n{self.installed_dir}"
-            )
-            self.stacked.setCurrentIndex(2)
-        else:
-            QMessageBox.critical(self, "Installation Failed", message)
-            self.stacked.setCurrentIndex(0)
+        self.lbl_status = tk.Label(card, text="Decompressing LZMA2 payload...", font=("Segoe UI", 10), fg="#ffffff", bg="#1a1a1a")
+        self.lbl_status.pack(anchor="w", padx=15, pady=(10, 10))
+
+        self.pbar = ttk.Progressbar(card, style="TProgressbar", maximum=100)
+        self.pbar.pack(fill="x", padx=15, pady=10)
+
+    def run_install_thread(self):
+        try:
+            self.update_status(5, "Preparing installation folder...")
+            os.makedirs(self.installed_dir, exist_ok=True)
+
+            payload_file = resource_path("payload.tar.xz")
+            if not os.path.exists(payload_file):
+                payload_file = os.path.abspath("payload.tar.xz")
+
+            if not os.path.exists(payload_file):
+                self.root.after(0, lambda: messagebox.showerror("Error", "Payload archive payload.tar.xz not found!"))
+                return
+
+            self.update_status(10, "Opening solid LZMA2 payload archive...")
+
+            with tarfile.open(payload_file, "r:xz") as tar:
+                members = tar.getmembers()
+                total = len(members)
+                if total == 0:
+                    self.root.after(0, lambda: messagebox.showerror("Error", "Archive is empty."))
+                    return
+
+                extracted = 0
+                for member in members:
+                    # Strip leading Ultimate_Quest_Folder prefix if present
+                    rel_name = member.name
+                    if rel_name.startswith("Ultimate_Quest_Folder/") or rel_name.startswith("Ultimate_Quest_Folder\\"):
+                        rel_name = rel_name.split("/", 1)[-1].split("\\", 1)[-1]
+
+                    if not rel_name or rel_name == "Ultimate_Quest_Folder":
+                        continue
+
+                    target_dest = os.path.join(self.installed_dir, rel_name)
+
+                    if member.isdir():
+                        os.makedirs(target_dest, exist_ok=True)
+                    else:
+                        os.makedirs(os.path.dirname(target_dest), exist_ok=True)
+                        with tar.extractfile(member) as s_file, open(target_dest, "wb") as d_file:
+                            shutil.copyfileobj(s_file, d_file)
+
+                    extracted += 1
+                    percent = int(10 + (extracted / total) * 80)
+                    self.update_status(percent, f"Extracting: {rel_name}")
+
+            main_exe = os.path.join(self.installed_dir, "Ultimate_Quest.exe")
+            ico_src = resource_path("icons/UQ.ico")
+            ico_dst = os.path.join(self.installed_dir, "app_icon.ico")
+
+            if os.path.exists(ico_src):
+                shutil.copy2(ico_src, ico_dst)
+            else:
+                ico_dst = main_exe
+
+            self.update_status(95, "Creating Windows shortcuts...")
+
+            if self.var_desktop.get():
+                desktop_dir = get_desktop_path()
+                shortcut_path = os.path.join(desktop_dir, "Ultimate Quest.lnk")
+                create_shortcut_windows(main_exe, shortcut_path, ico_dst)
+
+            if self.var_start_menu.get():
+                start_menu_dir = get_start_menu_path()
+                if start_menu_dir:
+                    os.makedirs(start_menu_dir, exist_ok=True)
+                    shortcut_path = os.path.join(start_menu_dir, "Ultimate Quest.lnk")
+                    create_shortcut_windows(main_exe, shortcut_path, ico_dst)
+
+            self.update_status(100, "Installation Complete!")
+            self.root.after(0, self.show_page_complete)
+        except Exception as e:
+            self.root.after(0, lambda err=str(e): messagebox.showerror("Installation Error", err))
+            self.root.after(0, self.show_page_select)
+
+    def update_status(self, percent, message):
+        self.root.after(0, lambda: self._apply_status(percent, message))
+
+    def _apply_status(self, percent, message):
+        if hasattr(self, 'pbar'):
+            self.pbar['value'] = percent
+        if hasattr(self, 'lbl_status'):
+            self.lbl_status.config(text=message)
+
+    def show_page_complete(self):
+        self.clear_page()
+
+        lbl_title = tk.Label(
+            self.page_frame,
+            text="🟢 Installation Complete!",
+            font=("Segoe UI", 18, "bold"),
+            fg="#00ffcc",
+            bg="#121212"
+        )
+        lbl_title.pack(anchor="w", pady=(0, 15))
+
+        card = tk.Frame(self.page_frame, bg="#1a1a1a", highlightbackground="#2a2a2a", highlightthickness=1)
+        card.pack(fill="x", pady=15, ipady=20, ipadx=15)
+
+        lbl_info = tk.Label(
+            card,
+            text=f"Ultimate Quest has been successfully installed to:\n\n{self.installed_dir}",
+            font=("Segoe UI", 10),
+            fg="#cccccc",
+            bg="#1a1a1a",
+            justify="left",
+            wraplength=520
+        )
+        lbl_info.pack(anchor="w", padx=15, pady=(10, 15))
+
+        self.var_launch = tk.BooleanVar(value=True)
+        chk_launch = tk.Checkbutton(
+            card,
+            text="Launch Ultimate Quest now",
+            variable=self.var_launch,
+            font=("Segoe UI", 10),
+            fg="#ffffff",
+            bg="#1a1a1a",
+            selectcolor="#222222",
+            activebackground="#1a1a1a",
+            activeforeground="#ffffff"
+        )
+        chk_launch.pack(anchor="w", padx=15, pady=5)
+
+        btn_row = tk.Frame(self.page_frame, bg="#121212")
+        btn_row.pack(fill="x", side="bottom", pady=10)
+
+        btn_finish = tk.Button(
+            btn_row,
+            text="Finish",
+            font=("Segoe UI", 11, "bold"),
+            bg="#1f8b4c",
+            fg="#ffffff",
+            activebackground="#28a85a",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=25,
+            pady=6,
+            command=self.finish_action
+        )
+        btn_finish.pack(side="right")
 
     def finish_action(self):
-        if self.chk_launch.isChecked():
+        if self.var_launch.get():
             main_exe = os.path.join(self.installed_dir, "Ultimate_Quest.exe")
             if os.path.exists(main_exe):
                 try:
                     subprocess.Popen([main_exe])
                 except Exception as e:
                     print(f"Failed to launch: {e}")
-        self.close()
+        self.root.destroy()
 
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    app.setStyleSheet(DARK_THEME)
-    win = SetupInstallerLightApp()
-    win.show()
-    sys.exit(app.exec())
+    root = tk.Tk()
+    app = SetupInstallerLightTk(root)
+    root.mainloop()
