@@ -35,22 +35,19 @@ def run_pyinstaller(cmd, step_name):
 
 def main():
     """Build the timer and Ultimate Quest executables."""
-    print("Step 1: Generating the Dark-Mode Timer Script...")
-    with open("timer_app.py", "w", encoding="utf-8") as f:
-        f.write(TIMER_CODE)
+    print("Step 1: Generating the Dark-Mode Timer CS Code...")
+    with open("timer_app.cs", "w", encoding="utf-8") as f:
+        f.write(TIMER_CS_CODE)
 
-    print("Step 2: Compiling Timer App...")
-    run_pyinstaller(
-        [sys.executable, "-m", "PyInstaller", "--noconfirm", "--onefile", "--windowed",
-         "--exclude-module", "PySide6", "--exclude-module", "numpy",
-         "--exclude-module", "matplotlib", "--exclude-module", "pandas",
-         "--exclude-module", "scipy",
-         "--name", "timer", "timer_app.py"],
-        "Timer compilation"
+    print("Step 2: Compiling Lightweight Native Timer App (csc.exe)...")
+    csc_path = r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+    if not os.path.exists(csc_path):
+        csc_path = r"C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+
+    subprocess.run(
+        [csc_path, "/target:winexe", "/nologo", "/r:System.Drawing.dll", "/r:System.Windows.Forms.dll", "/out:timer.exe", "timer_app.cs"],
+        check=True
     )
-
-    print("Step 3: Moving timer.exe to working directory...")
-    shutil.copy(os.path.join("dist", "timer.exe"), "timer.exe")
 
     print("Step 4: Preparing Icon Bundle...")
     os.makedirs("icons", exist_ok=True)
@@ -140,422 +137,278 @@ def main():
         print("\nSUCCESS! You can now use 'Ultimate_Quest.exe'.")
 
 
-TIMER_CODE = r"""
-import sys
-import os
-import json
-import time
-import random
-import subprocess
-import tkinter as tk
-from tkinter import ttk, messagebox
-from pathlib import Path
+TIMER_CS_CODE = r"""
+using System;
+using System.IO;
+using System.Drawing;
+using System.Windows.Forms;
+using System.Diagnostics;
 
+namespace TimerApplication
+{
+    static class Program
+    {
+        [STAThread]
+        static void Main()
+        {
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new TimerApp());
+        }
+    }
 
-def _get_save_folder():
-    '''Return the local app data folder for UltimateQuest.'''
-    appdata_dir = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
-    folder = os.path.join(appdata_dir, "UltimateQuest")
-    os.makedirs(folder, exist_ok=True)
-    return folder
+    public class TimerApp : Form
+    {
+        private Label lblTitle;
+        private Label lblTimer;
+        private CheckBox chkAsk;
+        private Timer timer;
+        private int totalSeconds;
+        private string exePath;
+        private string exeName;
+        private string runningTimersFile;
 
+        public TimerApp()
+        {
+            exePath = Process.GetCurrentProcess().MainModule.FileName;
+            exeName = Path.GetFileNameWithoutExtension(exePath);
 
-SAVE_FOLDER = _get_save_folder()
-RUNNING_TIMERS_FILE = os.path.join(SAVE_FOLDER, "running_timers.json")
-SETTINGS_FILE = os.path.join(SAVE_FOLDER, "settings.json")
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string saveFolder = Path.Combine(appData, "UltimateQuest");
+            Directory.CreateDirectory(saveFolder);
+            runningTimersFile = Path.Combine(saveFolder, "running_timers.json");
 
+            string candidateIcon = Path.Combine(Path.GetDirectoryName(exePath), exeName + "_icon.ico");
+            if (File.Exists(candidateIcon))
+            {
+                try { this.Icon = new Icon(candidateIcon); } catch {}
+            }
 
-def _self_exe_path():
-    '''Return the normalized absolute path of the running executable.'''
-    try:
-        return os.path.normpath(os.path.abspath(sys.executable))
-    except Exception:
-        return os.path.normpath(os.path.abspath(__file__))
+            this.Text = exeName;
+            this.Size = new Size(350, 160);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.BackColor = Color.FromArgb(18, 18, 18);
 
+            lblTitle = new Label();
+            lblTitle.Text = exeName;
+            lblTitle.Font = new Font("Segoe UI", 15, FontStyle.Bold);
+            lblTitle.ForeColor = Color.White;
+            lblTitle.Location = new Point(10, 10);
+            lblTitle.Size = new Size(315, 30);
+            lblTitle.TextAlign = ContentAlignment.MiddleCenter;
+            this.Controls.Add(lblTitle);
 
-def _self_display_name():
-    '''Return the display name (stem) of the running executable.'''
-    return Path(_self_exe_path()).stem
+            lblTimer = new Label();
+            lblTimer.Text = "00:00";
+            lblTimer.Font = new Font("Segoe UI", 26, FontStyle.Bold);
+            lblTimer.ForeColor = Color.FromArgb(0, 255, 204);
+            lblTimer.Location = new Point(10, 40);
+            lblTimer.Size = new Size(315, 45);
+            lblTimer.TextAlign = ContentAlignment.MiddleCenter;
+            this.Controls.Add(lblTimer);
 
+            chkAsk = new CheckBox();
+            chkAsk.Text = "Ask every time before closing";
+            chkAsk.Font = new Font("Segoe UI", 9);
+            chkAsk.ForeColor = Color.FromArgb(170, 170, 170);
+            chkAsk.BackColor = Color.FromArgb(18, 18, 18);
+            chkAsk.Checked = LoadAskSetting();
+            chkAsk.Location = new Point(80, 88);
+            chkAsk.AutoSize = true;
+            chkAsk.CheckedChanged += (s, e) => SaveAskSetting(chkAsk.Checked);
+            this.Controls.Add(chkAsk);
 
-def _self_icon_path():
-    '''Return the icon file path if it exists alongside the executable.'''
-    p = Path(_self_exe_path())
-    candidate = p.with_name(p.stem + "_icon.ico")
-    return str(candidate) if candidate.exists() else None
+            Random rnd = new Random();
+            totalSeconds = rnd.Next(15 * 60 + 30, 16 * 60 + 1);
 
+            UpdateTimerDisplay();
+            WriteStatus(totalSeconds);
 
-def _get_manifest_path():
-    '''Return the associated steam appmanifest path if passed or present.'''
-    p = Path(_self_exe_path())
-    candidate = p.with_name(p.stem + "_manifest.path")
-    if candidate.exists():
-        try:
-            return candidate.read_text(encoding="utf-8").strip()
-        except Exception:
-            pass
-    return ""
+            timer = new Timer();
+            timer.Interval = 1000;
+            timer.Tick += Timer_Tick;
+            timer.Start();
 
+            this.FormClosing += TimerApp_FormClosing;
+        }
 
-def load_settings():
-    '''Load settings from disk.'''
-    defaults = {"ask_on_manual_close": True}
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                defaults.update(data)
-        except Exception:
-            pass
-    return defaults
+        private void Timer_Tick(object sender, EventArgs e)
+        {
+            totalSeconds--;
+            if (totalSeconds <= 0)
+            {
+                timer.Stop();
+                ScheduleSelfDelete();
+                ClearStatus();
+                this.FormClosing -= TimerApp_FormClosing;
+                Application.Exit();
+                return;
+            }
+            UpdateTimerDisplay();
+            WriteStatus(totalSeconds);
+        }
 
+        private void UpdateTimerDisplay()
+        {
+            int mins = totalSeconds / 60;
+            int secs = totalSeconds % 60;
+            lblTimer.Text = string.Format("{0:D2}:{1:D2}", mins, secs);
+        }
 
-def save_settings(settings):
-    '''Save settings to disk.'''
-    try:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(settings, f, indent=4)
-    except Exception:
-        pass
+        private bool LoadAskSetting()
+        {
+            try {
+                string settingsFile = Path.Combine(Path.GetDirectoryName(runningTimersFile), "settings.json");
+                if (File.Exists(settingsFile)) {
+                    string txt = File.ReadAllText(settingsFile);
+                    if (txt.Contains("\"ask_on_manual_close\": false")) return false;
+                }
+            } catch {}
+            return true;
+        }
 
+        private void SaveAskSetting(bool val)
+        {
+            try {
+                string settingsFile = Path.Combine(Path.GetDirectoryName(runningTimersFile), "settings.json");
+                string txt = string.Format("{{\"ask_on_manual_close\": {0}}}", val.ToString().ToLower());
+                File.WriteAllText(settingsFile, txt);
+            } catch {}
+        }
 
-class TimerWindow:
-    '''Lightweight Tkinter countdown timer window.'''
+        private void TimerApp_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                bool askEverytime = chkAsk.Checked;
+                if (!askEverytime)
+                {
+                    ScheduleSelfDelete();
+                    ClearStatus();
+                    return;
+                }
 
-    def __init__(self, root):
-        self.root = root
-        display_name = _self_display_name()
-        self.root.title(display_name)
+                e.Cancel = true;
 
-        self.settings = load_settings()
+                using (Form dlg = new Form())
+                {
+                    dlg.Text = "Confirm Exit";
+                    dlg.Size = new Size(420, 220);
+                    dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                    dlg.MaximizeBox = false;
+                    dlg.StartPosition = FormStartPosition.CenterParent;
+                    dlg.BackColor = Color.FromArgb(26, 26, 26);
 
-        icon_path = _self_icon_path()
-        if icon_path:
-            try:
-                self.root.iconbitmap(icon_path)
-            except Exception:
-                pass
+                    Label lbl = new Label();
+                    lbl.Text = "Do you want to delete game files and manifest upon closing?";
+                    lbl.Font = new Font("Segoe UI", 11);
+                    lbl.ForeColor = Color.White;
+                    lbl.Location = new Point(20, 20);
+                    lbl.Size = new Size(360, 45);
+                    lbl.TextAlign = ContentAlignment.TopCenter;
+                    dlg.Controls.Add(lbl);
 
-        self.root.geometry("350x150")
-        self.root.resizable(False, False)
-        self.root.configure(bg="#121212")
+                    CheckBox chkDlg = new CheckBox();
+                    chkDlg.Text = "Ask every time before closing";
+                    chkDlg.Font = new Font("Segoe UI", 10);
+                    chkDlg.ForeColor = Color.FromArgb(204, 204, 204);
+                    chkDlg.Checked = chkAsk.Checked;
+                    chkDlg.Location = new Point(110, 75);
+                    chkDlg.AutoSize = true;
+                    dlg.Controls.Add(chkDlg);
 
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        x = (screen_w - 350) // 2
-        y = (screen_h - 150) // 2
-        self.root.geometry(f"350x150+{x}+{y}")
+                    Button btnYes = new Button();
+                    btnYes.Text = "Yes";
+                    btnYes.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+                    btnYes.ForeColor = Color.White;
+                    btnYes.BackColor = Color.FromArgb(31, 139, 76);
+                    btnYes.FlatStyle = FlatStyle.Flat;
+                    btnYes.FlatAppearance.BorderSize = 0;
+                    btnYes.Size = new Size(110, 35);
+                    btnYes.Location = new Point(70, 120);
 
-        frame = tk.Frame(self.root, bg="#121212")
-        frame.pack(expand=True, fill="both", padx=15, pady=15)
+                    Button btnNo = new Button();
+                    btnNo.Text = "No";
+                    btnNo.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+                    btnNo.ForeColor = Color.White;
+                    btnNo.BackColor = Color.FromArgb(217, 56, 56);
+                    btnNo.FlatStyle = FlatStyle.Flat;
+                    btnNo.FlatAppearance.BorderSize = 0;
+                    btnNo.Size = new Size(110, 35);
+                    btnNo.Location = new Point(220, 120);
 
-        self.lbl_status = tk.Label(
-            frame,
-            text=display_name,
-            font=("Segoe UI", 16, "bold"),
-            fg="#ffffff",
-            bg="#121212",
-            wraplength=320,
-            justify="center"
-        )
-        self.lbl_status.pack(pady=(5, 5))
+                    btnYes.Click += (s, ev) => {
+                        chkAsk.Checked = chkDlg.Checked;
+                        SaveAskSetting(chkDlg.Checked);
+                        dlg.DialogResult = DialogResult.Yes;
+                    };
 
-        self.lbl_timer = tk.Label(
-            frame,
-            text="00:00",
-            font=("Segoe UI", 28, "bold"),
-            fg="#00ffcc",
-            bg="#121212"
-        )
-        self.lbl_timer.pack(pady=(0, 2))
+                    btnNo.Click += (s, ev) => {
+                        chkAsk.Checked = chkDlg.Checked;
+                        SaveAskSetting(chkDlg.Checked);
+                        dlg.DialogResult = DialogResult.No;
+                    };
 
-        self.var_ask_timer = tk.BooleanVar(value=self.settings.get("ask_on_manual_close", True))
-        self.chk_timer = tk.Checkbutton(
-            frame,
-            text="Ask every time before closing",
-            variable=self.var_ask_timer,
-            command=self.on_toggle_timer_chk,
-            font=("Segoe UI", 9),
-            fg="#aaaaaa",
-            bg="#121212",
-            selectcolor="#222222",
-            activebackground="#121212",
-            activeforeground="#ffffff"
-        )
-        self.chk_timer.pack(pady=(2, 5))
+                    dlg.Controls.Add(btnYes);
+                    dlg.Controls.Add(btnNo);
 
-        # Runtime set to 15 Min 30s to 16 Min (930s to 960s)
-        self.total_seconds = random.randint(15 * 60 + 30, 16 * 60)
+                    DialogResult res = dlg.ShowDialog(this);
+                    if (res == DialogResult.Yes)
+                    {
+                        ScheduleSelfDelete();
+                        ClearStatus();
+                        this.FormClosing -= TimerApp_FormClosing;
+                        Application.Exit();
+                    }
+                    else if (res == DialogResult.No)
+                    {
+                        ClearStatus();
+                        this.FormClosing -= TimerApp_FormClosing;
+                        Application.Exit();
+                    }
+                }
+            }
+        }
 
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        private void WriteStatus(int remainingSeconds)
+        {
+            try {
+                string content = string.Format("{{\"{0}\": {{\"remaining_seconds\": {1}, \"updated\": {2}}}}}",
+                    exePath.Replace("\\", "\\\\"), remainingSeconds, DateTime.UtcNow.Subtract(new DateTime(1970, 1, 1)).TotalSeconds);
+                File.WriteAllText(runningTimersFile, content);
+            } catch {}
+        }
 
-        self.update_timer_display()
-        self._write_status(self.total_seconds)
-        self.tick_timer()
+        private void ClearStatus()
+        {
+            try {
+                if (File.Exists(runningTimersFile)) File.Delete(runningTimersFile);
+            } catch {}
+        }
 
-    def on_toggle_timer_chk(self):
-        '''Save setting when checkbox inside timer window is toggled.'''
-        self.settings["ask_on_manual_close"] = self.var_ask_timer.get()
-        save_settings(self.settings)
+        private void ScheduleSelfDelete()
+        {
+            try {
+                string folder = Path.GetDirectoryName(exePath);
+                string candidateIcon = Path.Combine(folder, exeName + "_icon.ico");
+                string candidateManifest = Path.Combine(folder, exeName + "_manifest.path");
 
-    def tick_timer(self):
-        '''Tick the countdown by one second.'''
-        if self.total_seconds <= 0:
-            self._schedule_self_delete()
-            self._clear_status()
-            self.root.destroy()
-            return
-        self.total_seconds -= 1
-        self.update_timer_display()
-        self._write_status(self.total_seconds)
-        self.root.after(1000, self.tick_timer)
-
-    def update_timer_display(self):
-        '''Update the timer label with MM:SS format.'''
-        mins, secs = divmod(self.total_seconds, 60)
-        self.lbl_timer.config(text=f"{mins:02d}:{secs:02d}")
-
-    def _write_status(self, remaining_seconds):
-        '''Write remaining seconds to the shared running_timers file.'''
-        try:
-            data = {}
-            if os.path.exists(RUNNING_TIMERS_FILE):
-                try:
-                    with open(RUNNING_TIMERS_FILE, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                except Exception:
-                    data = {}
-            data[_self_exe_path()] = {"remaining_seconds": remaining_seconds, "updated": time.time()}
-            tmp_path = RUNNING_TIMERS_FILE + ".tmp"
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f)
-            os.replace(tmp_path, RUNNING_TIMERS_FILE)
-        except Exception:
-            pass
-
-    def _clear_status(self):
-        '''Remove this timer's entry from the shared running_timers file.'''
-        try:
-            if os.path.exists(RUNNING_TIMERS_FILE):
-                with open(RUNNING_TIMERS_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                data.pop(_self_exe_path(), None)
-                tmp_path = RUNNING_TIMERS_FILE + ".tmp"
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f)
-                os.replace(tmp_path, RUNNING_TIMERS_FILE)
-        except Exception:
-            pass
-
-    def _schedule_self_delete(self):
-        '''Dynamically compile a deleter.exe using C# csc.exe to handle cleanup.'''
-        try:
-            exe_path = _self_exe_path()
-            folder = os.path.dirname(exe_path)
-            icon_path = _self_icon_path() or ""
-            manifest_path = _get_manifest_path()
-            temp_dir = os.environ.get("TEMP") or os.environ.get("TMP") or folder
-            pid = os.getpid()
-
-            cs_path = os.path.join(temp_dir, f"_uq_deleter_{pid}.cs")
-            deleter_exe = os.path.join(temp_dir, f"deleter_{pid}.exe")
-
-            cs_lines = [
-                "using System;",
-                "using System.IO;",
-                "using System.Threading;",
-                "using System.Diagnostics;",
-                "",
-                "class Deleter {",
-                "    static void Main(string[] args) {",
-                "        if (args.Length < 1) return;",
-                "        string exePath = args[0];",
-                "        string iconPath = args.Length > 1 ? args[1] : \"\";",
-                "        string folderPath = args.Length > 2 ? args[2] : \"\";",
-                "        string manifestPath = args.Length > 3 ? args[3] : \"\";",
-                "",
-                "        for (int i = 0; i < 30; i++) {",
-                "            try {",
-                "                if (File.Exists(exePath)) {",
-                "                    File.Delete(exePath);",
-                "                }",
-                "                break;",
-                "            } catch {",
-                "                Thread.Sleep(1000);",
-                "            }",
-                "        }",
-                "",
-                "        if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath)) {",
-                "            try { File.Delete(iconPath); } catch {}",
-                "        }",
-                "",
-                "        if (!string.IsNullOrEmpty(manifestPath) && File.Exists(manifestPath)) {",
-                "            try { File.Delete(manifestPath); } catch {}",
-                "        }",
-                "",
-                "        if (!string.IsNullOrEmpty(folderPath) && Directory.Exists(folderPath)) {",
-                "            try { Directory.Delete(folderPath, true); } catch {}",
-                "        }",
-                "",
-                "        try {",
-                "            string selfPath = Process.GetCurrentProcess().MainModule.FileName;",
-                "            ProcessStartInfo psi = new ProcessStartInfo();",
-                "            psi.FileName = \"cmd.exe\";",
-                "            psi.Arguments = \"/c choice /C Y /N /D Y /T 1 & del /f /q \\\"\" + selfPath + \"\\\"\";",
-                "            psi.WindowStyle = ProcessWindowStyle.Hidden;",
-                "            psi.CreateNoWindow = true;",
-                "            Process.Start(psi);",
-                "        } catch {}",
-                "    }",
-                "}"
-            ]
-            cs_code = "\n".join(cs_lines)
-            with open(cs_path, "w", encoding="utf-8") as f:
-                f.write(cs_code)
-
-            csc_path = r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-            if not os.path.exists(csc_path):
-                csc_path = r"C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
-
-            if os.path.exists(csc_path):
-                subprocess.run(
-                    [csc_path, "/target:winexe", "/nologo", f"/out:{deleter_exe}", cs_path],
-                    creationflags=0x08000000,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-
-            DETACHED_PROCESS = 0x00000008
-            CREATE_NO_WINDOW = 0x08000000
-
-            if os.path.exists(deleter_exe):
-                subprocess.Popen(
-                    [deleter_exe, exe_path, icon_path, folder, manifest_path],
-                    creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
-                    close_fds=True
-                )
-                try:
-                    os.remove(cs_path)
-                except Exception:
-                    pass
-            else:
-                bat_path = os.path.join(temp_dir, f"_uq_cleanup_{pid}.bat")
-                bat_lines = [
-                    "@echo off",
-                    ":loop",
-                    f'del /f /q "{exe_path}" >nul 2>&1',
-                    f'if exist "{exe_path}" (',
-                    "  timeout /t 1 /nobreak >nul",
-                    "  goto loop",
-                    ")",
-                ]
-                if icon_path:
-                    bat_lines.append(f'del /f /q "{icon_path}" >nul 2>&1')
-                if manifest_path:
-                    bat_lines.append(f'del /f /q "{manifest_path}" >nul 2>&1')
-                bat_lines += [
-                    f'rmdir /s /q "{folder}" >nul 2>&1',
-                    'del /f /q "%~f0"',
-                ]
-                with open(bat_path, "w", newline='') as f:
-                    f.write("\r\n".join(bat_lines) + "\r\n")
-                subprocess.Popen(
-                    ["cmd.exe", "/c", bat_path],
-                    creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
-                    close_fds=True
-                )
-        except Exception:
-            pass
-
-    def on_close(self):
-        '''Handle manual window close event.'''
-        self.settings = load_settings()
-        ask_everytime = self.settings.get("ask_on_manual_close", True)
-
-        if not ask_everytime:
-            self._schedule_self_delete()
-            self._clear_status()
-            self.root.destroy()
-            return
-
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Confirm Exit")
-        dialog.geometry("400x220")
-        dialog.resizable(False, False)
-        dialog.configure(bg="#1a1a1a")
-
-        screen_w = dialog.winfo_screenwidth()
-        screen_h = dialog.winfo_screenheight()
-        x = (screen_w - 400) // 2
-        y = (screen_h - 220) // 2
-        dialog.geometry(f"400x220+{x}+{y}")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        lbl = tk.Label(
-            dialog,
-            text="Do you want to delete game files and manifest upon closing?",
-            font=("Segoe UI", 11),
-            fg="#ffffff",
-            bg="#1a1a1a",
-            wraplength=360,
-            justify="center"
-        )
-        lbl.pack(pady=(15, 10))
-
-        var_dialog_ask = tk.BooleanVar(value=True)
-        chk = tk.Checkbutton(
-            dialog,
-            text="Ask every time before closing",
-            variable=var_dialog_ask,
-            font=("Segoe UI", 10),
-            fg="#cccccc",
-            bg="#1a1a1a",
-            selectcolor="#2a2a2a",
-            activebackground="#1a1a1a",
-            activeforeground="#ffffff"
-        )
-        chk.pack(pady=(0, 15))
-
-        btn_frame = tk.Frame(dialog, bg="#1a1a1a")
-        btn_frame.pack(fill="x", padx=30, pady=(5, 15))
-
-        def action_yes():
-            ask_val = var_dialog_ask.get()
-            self.settings["ask_on_manual_close"] = ask_val
-            self.var_ask_timer.set(ask_val)
-            save_settings(self.settings)
-            dialog.destroy()
-            self._schedule_self_delete()
-            self._clear_status()
-            self.root.destroy()
-
-        def action_no():
-            ask_val = var_dialog_ask.get()
-            self.settings["ask_on_manual_close"] = ask_val
-            self.var_ask_timer.set(ask_val)
-            save_settings(self.settings)
-            dialog.destroy()
-
-        btn_yes = tk.Button(
-            btn_frame, text="Yes", font=("Segoe UI", 10, "bold"),
-            fg="#ffffff", bg="#1f8b4c", activebackground="#28a85a", bd=0, width=12, pady=6, command=action_yes
-        )
-        btn_yes.pack(side="left", expand=True, padx=8)
-
-        btn_no = tk.Button(
-            btn_frame, text="No", font=("Segoe UI", 10, "bold"),
-            fg="#ffffff", bg="#d93838", activebackground="#e54a4a", bd=0, width=12, pady=6, command=action_no
-        )
-        btn_no.pack(side="right", expand=True, padx=8)
-
-        self.root.wait_window(dialog)
-
-
-if __name__ == '__main__':
-    root = tk.Tk()
-    app = TimerWindow(root)
-    root.mainloop()
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = "cmd.exe";
+                string args = string.Format("/c timeout /t 2 /nobreak >nul & del /f /q \"{0}\"", exePath);
+                if (File.Exists(candidateIcon)) args += string.Format(" & del /f /q \"{0}\"", candidateIcon);
+                if (File.Exists(candidateManifest)) args += string.Format(" & del /f /q \"{0}\"", candidateManifest);
+                args += string.Format(" & rmdir /s /q \"{0}\"", folder);
+                psi.Arguments = args;
+                psi.WindowStyle = ProcessWindowStyle.Hidden;
+                psi.CreateNoWindow = true;
+                Process.Start(psi);
+            } catch {}
+        }
+    }
+}
 """
 
 BUILDER_CODE = r"""
