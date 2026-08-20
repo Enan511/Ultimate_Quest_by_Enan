@@ -394,13 +394,63 @@ namespace TimerApplication
                 string folder = Path.GetDirectoryName(exePath);
                 string candidateIcon = Path.Combine(folder, exeName + "_icon.ico");
                 string candidateManifest = Path.Combine(folder, exeName + "_manifest.path");
+                string manifestTarget = string.Empty;
+
+                if (File.Exists(candidateManifest))
+                {
+                    try { manifestTarget = File.ReadAllText(candidateManifest).Trim(); } catch {}
+                }
+
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string appInstallDir = Path.Combine(appData, "UEQuest by E");
+                string desktopDir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                string downloadsDir = Path.Combine(userProfile, "Downloads");
+                string docsDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                string progFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                string progFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+                string winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
 
                 ProcessStartInfo psi = new ProcessStartInfo();
                 psi.FileName = "cmd.exe";
                 string args = string.Format("/c timeout /t 2 /nobreak >nul & del /f /q \"{0}\"", exePath);
                 if (File.Exists(candidateIcon)) args += string.Format(" & del /f /q \"{0}\"", candidateIcon);
                 if (File.Exists(candidateManifest)) args += string.Format(" & del /f /q \"{0}\"", candidateManifest);
-                args += string.Format(" & rmdir /s /q \"{0}\"", folder);
+                if (!string.IsNullOrEmpty(manifestTarget) && File.Exists(manifestTarget)) {
+                    args += string.Format(" & del /f /q \"{0}\"", manifestTarget);
+                }
+
+                bool isProtected = string.IsNullOrEmpty(folder) ||
+                                   Path.GetPathRoot(folder).Equals(folder, StringComparison.OrdinalIgnoreCase) ||
+                                   folder.Equals(appInstallDir, StringComparison.OrdinalIgnoreCase) ||
+                                   folder.Equals(desktopDir, StringComparison.OrdinalIgnoreCase) ||
+                                   folder.Equals(downloadsDir, StringComparison.OrdinalIgnoreCase) ||
+                                   folder.Equals(docsDir, StringComparison.OrdinalIgnoreCase) ||
+                                   folder.Equals(progFiles, StringComparison.OrdinalIgnoreCase) ||
+                                   folder.Equals(progFilesX86, StringComparison.OrdinalIgnoreCase) ||
+                                   folder.Equals(winDir, StringComparison.OrdinalIgnoreCase);
+
+                if (!isProtected)
+                {
+                    args += string.Format(" & rmdir \"{0}\"", folder);
+                    string parentFolder = Path.GetDirectoryName(folder);
+                    if (!string.IsNullOrEmpty(parentFolder))
+                    {
+                        bool isParentProtected = Path.GetPathRoot(parentFolder).Equals(parentFolder, StringComparison.OrdinalIgnoreCase) ||
+                                                 parentFolder.Equals(appInstallDir, StringComparison.OrdinalIgnoreCase) ||
+                                                 parentFolder.Equals(desktopDir, StringComparison.OrdinalIgnoreCase) ||
+                                                 parentFolder.Equals(downloadsDir, StringComparison.OrdinalIgnoreCase) ||
+                                                 parentFolder.Equals(docsDir, StringComparison.OrdinalIgnoreCase) ||
+                                                 parentFolder.Equals(progFiles, StringComparison.OrdinalIgnoreCase) ||
+                                                 parentFolder.Equals(progFilesX86, StringComparison.OrdinalIgnoreCase) ||
+                                                 parentFolder.Equals(winDir, StringComparison.OrdinalIgnoreCase);
+                        if (!isParentProtected)
+                        {
+                            args += string.Format(" & rmdir \"{0}\"", parentFolder);
+                        }
+                    }
+                }
+
                 psi.Arguments = args;
                 psi.WindowStyle = ProcessWindowStyle.Hidden;
                 psi.CreateNoWindow = true;
@@ -653,6 +703,48 @@ def truncate_path(path_str, max_chars=60):
     if len(truncated) <= max_chars:
         return truncated
     return f"...{sep}{parts[-2]}{sep}{parts[-1]}"
+
+
+def is_protected_directory(dir_path):
+    '''Check if directory is a protected/system directory.'''
+    try:
+        norm = os.path.normpath(os.path.abspath(dir_path)).lower()
+        drive, tail = os.path.splitdrive(norm)
+        if not tail or tail == os.sep:
+            return True
+        appdata = (os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")).lower()
+        app_install = os.path.normpath(os.path.join(appdata, "uequest by e")).lower()
+        desktop = os.path.normpath(os.path.expanduser("~/desktop")).lower()
+        downloads = os.path.normpath(os.path.expanduser("~/downloads")).lower()
+        documents = os.path.normpath(os.path.expanduser("~/documents")).lower()
+        prog_files = os.path.normpath(os.environ.get("ProgramFiles", "C:/Program Files")).lower()
+        prog_files_x86 = os.path.normpath(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")).lower()
+        windir = os.path.normpath(os.environ.get("WINDIR", "C:/Windows")).lower()
+        temp_dir = os.path.normpath(os.environ.get("TEMP", "C:/Windows/Temp")).lower()
+
+        if norm in (app_install, desktop, downloads, documents, prog_files, prog_files_x86, windir, temp_dir):
+            return True
+        return False
+    except Exception:
+        return True
+
+
+def safe_remove_empty_dir(dir_path):
+    '''Remove directory only if completely empty and not protected. Walks upward safely.'''
+    try:
+        if not dir_path:
+            return
+        norm = os.path.normpath(os.path.abspath(dir_path))
+        if is_protected_directory(norm):
+            return
+        if os.path.exists(norm) and os.path.isdir(norm):
+            if not os.listdir(norm):
+                os.rmdir(norm)
+                parent = os.path.dirname(norm)
+                if parent and parent != norm:
+                    safe_remove_empty_dir(parent)
+    except Exception:
+        pass
 
 
 def normalize_path_key(path):
@@ -1362,6 +1454,10 @@ class ExeBuilderApp(QMainWindow):
             g_name = lines[i]
             e_path = lines[i + 1].strip('"').strip("'")
             if g_name and e_path.lower().endswith(".exe"):
+                # Ensure isolated subfolder if bare filename provided
+                parts = Path(e_path).parts
+                if not Path(e_path).is_absolute() and len(parts) == 1:
+                    e_path = str(Path("Games") / Path(e_path).stem / e_path)
                 parsed_quests.append({"game_name": g_name, "exe_path": os.path.normpath(e_path)})
             i += 2
 
@@ -1484,6 +1580,11 @@ class ExeBuilderApp(QMainWindow):
             if not g_name or not e_path.lower().endswith(".exe"):
                 continue
 
+            # Ensure isolated subfolder if bare filename provided
+            parts = Path(e_path).parts
+            if not Path(e_path).is_absolute() and len(parts) == 1:
+                e_path = str(Path("Games") / Path(e_path).stem / e_path)
+
             e_path = os.path.normpath(e_path)
             valid_input = True
 
@@ -1547,28 +1648,46 @@ class ExeBuilderApp(QMainWindow):
 
     def delete_tracked_item(self, exe_path):
         with self._data_lock:
-            root_dir = None
             manifest_path = None
             for item in self.history:
                 if item["exe_path"] == exe_path:
-                    root_dir = item.get("root_dir")
                     manifest_path = item.get("manifest_path")
                     break
 
         resolved_exe = resolve_path(exe_path)
         try:
+            # 1. Delete Steam appmanifest if exists
             if manifest_path and os.path.exists(manifest_path):
                 try:
                     os.remove(manifest_path)
                 except Exception:
                     pass
-            if root_dir and os.path.exists(root_dir):
-                if os.path.isdir(root_dir):
-                    shutil.rmtree(root_dir)
-                else:
-                    os.remove(root_dir)
-            elif os.path.exists(resolved_exe):
-                os.remove(resolved_exe)
+
+            # 2. Delete game specific files
+            p = Path(resolved_exe)
+            if p.exists():
+                try:
+                    p.unlink()
+                except Exception:
+                    pass
+
+            icon_candidate = p.with_name(p.stem + "_icon.ico")
+            if icon_candidate.exists():
+                try:
+                    icon_candidate.unlink()
+                except Exception:
+                    pass
+
+            manifest_ref = p.with_name(p.stem + "_manifest.path")
+            if manifest_ref.exists():
+                try:
+                    manifest_ref.unlink()
+                except Exception:
+                    pass
+
+            # 3. Safely remove empty game directory and prune empty parents
+            safe_remove_empty_dir(p.parent)
+
             self.refresh_lists()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not delete files: {e}")

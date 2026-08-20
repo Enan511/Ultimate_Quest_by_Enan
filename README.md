@@ -11,7 +11,7 @@ A modern PySide6 desktop application designed for Discord Quest game spoofing an
 - **Morphing Card UI** — PySide6 `QStackedWidget` interface cleanly toggles upper section between Standard Mode and Steam Mode views without UI clutter.
 - **Ultra-Lightweight C# Countdown Timer** — Compiles a native 18 KB dark-mode C# timer executable (`timer.exe`) with 0 ms launch time, real-time countdown display, and preference toggles.
 - **Interactive Manual Exit Protocol** — Custom exit confirmation dialog (*"Do you want to delete game files upon closing?"*) featuring **Yes** (Green: deletes files + closes game) and **No** (Red: closes game without deleting files) controls, along with an `"Ask every time before closing"` preference toggle inside the timer window.
-- **Dynamic Cleanup** — Timer triggers a windowless background C# binary (`deleter.exe`) via Windows' built-in `csc.exe` to handle post-exit file, folder, icon, and manifest cleanup.
+- **Safe Dynamic Cleanup** — Targeted file-level cleanup with non-recursive directory pruning and protected system folder safeguards (prevents accidental deletion of parent directories or installed apps).
 - **Standalone Lightweight Updater (`UQ_Update_Light.exe`)** — A ultra-compact updater (~4.67 MB, well under 10 MB) that auto-detects existing installed directories from running processes, shortcuts, or registry, gracefully closes active processes, and applies updates in-place.
 - **Dual Setup Installers**:
   - **Full Setup (`Ultimate_Quest_Setup.exe`)** — Bundles application files along with the standalone **`UEQ Uninstaller.exe`** utility.
