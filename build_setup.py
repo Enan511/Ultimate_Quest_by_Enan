@@ -10,13 +10,15 @@ import os
 import subprocess
 import shutil
 
+from build_support import pyinstaller_environment, qt_runtime_files, runtime_binary_args
+
 MAIN_ICON_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "UQ.ico")
 
 
 def run_pyinstaller(cmd, step_name):
     """Run a PyInstaller command with error handling."""
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=pyinstaller_environment())
     except FileNotFoundError:
         print(f"\nERROR during {step_name}: PyInstaller not found.")
         sys.exit(1)
@@ -54,7 +56,7 @@ def main():
         "--windowed",
     ] + main_icon_arg + add_data_args + [
         "--name", "Ultimate_Quest_Setup"
-    ] + exclusions + ["setup_installer.py"]
+    ] + runtime_binary_args(qt_runtime_files()) + exclusions + ["setup_installer.py"]
 
     run_pyinstaller(cmd, "Setup compilation")
 

@@ -37,6 +37,8 @@ A modern PySide6 desktop application designed for Discord Quest game spoofing an
 pip install -r Requirements.txt
 ```
 
+Use a clean Windows Python environment for release builds. The app and full installer package the C++ runtime DLLs from the installed Shiboken wheel.
+
 ---
 
 ## Building from Source

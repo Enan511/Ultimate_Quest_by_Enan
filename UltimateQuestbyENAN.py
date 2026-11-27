@@ -3,6 +3,8 @@ import os
 import subprocess
 import shutil
 
+from build_support import pyinstaller_environment, qt_runtime_files, runtime_binary_args, stage_app_runtime
+
 # Build configuration mode:
 # BUILD_SINGLE_FILE = False compiles the app as a folder distribution (--onedir)
 # which provides instant application startup and clean file structure.
@@ -24,7 +26,7 @@ TIMER_ICONS = [
 def run_pyinstaller(cmd, step_name):
     """Run a PyInstaller command with error handling."""
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=pyinstaller_environment())
     except FileNotFoundError:
         print(f"\nERROR during {step_name}: PyInstaller not found. Install with: pip install pyinstaller")
         sys.exit(1)
@@ -35,6 +37,8 @@ def run_pyinstaller(cmd, step_name):
 
 def main():
     """Build the timer and Ultimate Quest executables."""
+    runtime_files = qt_runtime_files()
+    runtime_args = runtime_binary_args(runtime_files)
     print("Step 1: Generating the Dark-Mode Timer CS Code...")
     with open("timer_app.cs", "w", encoding="utf-8") as f:
         f.write(TIMER_CS_CODE)
@@ -93,7 +97,7 @@ def main():
         "--windowed",
     ] + main_icon_arg + add_data_args + [
         "--name", "Ultimate_Quest"
-    ] + exclusions + ["main_builder.py"]
+    ] + runtime_args + exclusions + ["main_builder.py"]
 
     run_pyinstaller(cmd, "Ultimate Quest compilation")
 
@@ -106,13 +110,14 @@ def main():
         if os.path.exists(out_dir):
             shutil.rmtree(out_dir)
         shutil.move(os.path.join("dist", "Ultimate_Quest"), out_dir)
+        stage_app_runtime(runtime_files, out_dir)
 
         if os.path.exists("uninstaller.py"):
             print("Step 6b: Compiling UEQ Uninstaller.exe...")
             run_pyinstaller(
                 [sys.executable, "-m", "PyInstaller", "--noconfirm", "--onefile", "--windowed",
                 "--name", "UEQ Uninstaller", "--add-data", f"{MAIN_ICON_SRC}{os.pathsep}icons"]
-                + main_icon_arg + exclusions + ["uninstaller.py"],
+                + main_icon_arg + runtime_args + exclusions + ["uninstaller.py"],
                 "Uninstaller compilation"
             )
             uninst_dist = os.path.join("dist", "UEQ Uninstaller.exe")
