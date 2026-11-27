@@ -10,8 +10,8 @@ BUILD_SINGLE_FILE = False
 
 RCEDIT_PATH = "rcedit.exe"
 
-# Local source icon file locations for compilation
-MAIN_ICON_SRC = r"D:\ML practice\Icons\UQ.ico"
+# Optional Steam and timer artwork can be supplied on the build machine.
+MAIN_ICON_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "UQ.ico")
 STEAM_ICON_SRC = r"D:\ML practice\Icons\Steam.ico"
 TIMER_ICONS = [
     r"D:\Icons\Jett.ico",
@@ -45,7 +45,8 @@ def main():
         csc_path = r"C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
 
     subprocess.run(
-        [csc_path, "/target:winexe", "/nologo", "/r:System.Drawing.dll", "/r:System.Windows.Forms.dll", "/out:timer.exe", "timer_app.cs"],
+        [csc_path, "/target:winexe", "/nologo", "/r:System.Drawing.dll", "/r:System.Windows.Forms.dll",
+         f"/win32icon:{MAIN_ICON_SRC}", "/out:timer.exe", "timer_app.cs"],
         check=True
     )
 
@@ -56,13 +57,8 @@ def main():
             shutil.copy(icon_src, os.path.join("icons", os.path.basename(icon_src)))
     if os.path.exists(STEAM_ICON_SRC):
         shutil.copy(STEAM_ICON_SRC, os.path.join("icons", "Steam.ico"))
-    if os.path.exists(MAIN_ICON_SRC):
-        shutil.copy(MAIN_ICON_SRC, os.path.join("icons", "UQ.ico"))
-
-    main_icon_arg = []
-    if os.path.exists(MAIN_ICON_SRC):
-        shutil.copy(MAIN_ICON_SRC, "uq.ico")
-        main_icon_arg = ["--icon", os.path.abspath("uq.ico")]
+    shutil.copy(MAIN_ICON_SRC, os.path.join("icons", "UQ.ico"))
+    main_icon_arg = ["--icon", MAIN_ICON_SRC]
 
     print("Step 5: Generating the Ultimate Quest Script...")
     with open("main_builder.py", "w", encoding="utf-8") as f:
@@ -115,7 +111,8 @@ def main():
             print("Step 6b: Compiling UEQ Uninstaller.exe...")
             run_pyinstaller(
                 [sys.executable, "-m", "PyInstaller", "--noconfirm", "--onefile", "--windowed",
-                 "--name", "UEQ Uninstaller"] + main_icon_arg + exclusions + ["uninstaller.py"],
+                "--name", "UEQ Uninstaller", "--add-data", f"{MAIN_ICON_SRC}{os.pathsep}icons"]
+                + main_icon_arg + exclusions + ["uninstaller.py"],
                 "Uninstaller compilation"
             )
             uninst_dist = os.path.join("dist", "UEQ Uninstaller.exe")
@@ -126,7 +123,7 @@ def main():
         print(f"\nSUCCESS! Your app is inside the '{out_dir}' folder.")
 
 
-    for file in ["timer_app.py", "main_builder.py", "timer.exe", "uq.ico", "timer.spec", "Ultimate_Quest.spec"]:
+    for file in ["timer_app.cs", "main_builder.py", "timer.exe", "timer.spec", "Ultimate_Quest.spec"]:
         if os.path.exists(file):
             os.remove(file)
     for folder in ["build", "dist", "__pycache__", "icons"]:
@@ -179,10 +176,11 @@ namespace TimerApplication
             runningTimersFile = Path.Combine(saveFolder, "running_timers.json");
 
             string candidateIcon = Path.Combine(Path.GetDirectoryName(exePath), exeName + "_icon.ico");
-            if (File.Exists(candidateIcon))
+            try
             {
-                try { this.Icon = new Icon(candidateIcon); } catch {}
+                this.Icon = File.Exists(candidateIcon) ? new Icon(candidateIcon) : Icon.ExtractAssociatedIcon(exePath);
             }
+            catch {}
 
             this.Text = exeName;
             this.Size = new Size(350, 160);
@@ -413,7 +411,8 @@ namespace TimerApplication
 
                 ProcessStartInfo psi = new ProcessStartInfo();
                 psi.FileName = "cmd.exe";
-                string args = string.Format("/c timeout /t 2 /nobreak >nul & del /f /q \"{0}\"", exePath);
+                // The hidden cleanup process has no interactive input for timeout.exe.
+                string args = string.Format("/d /c ping.exe -n 3 127.0.0.1 >nul & del /f /q \"{0}\"", exePath);
                 if (File.Exists(candidateIcon)) args += string.Format(" & del /f /q \"{0}\"", candidateIcon);
                 if (File.Exists(candidateManifest)) args += string.Format(" & del /f /q \"{0}\"", candidateManifest);
                 if (!string.IsNullOrEmpty(manifestTarget) && File.Exists(manifestTarget)) {
@@ -454,7 +453,18 @@ namespace TimerApplication
                 psi.Arguments = args;
                 psi.WindowStyle = ProcessWindowStyle.Hidden;
                 psi.CreateNoWindow = true;
-                Process.Start(psi);
+                using (Process cleanup = Process.Start(psi))
+                {
+                    if (cleanup != null)
+                    {
+                        string cleanupDir = Path.Combine(appData, "UltimateQuest", "cleanup");
+                        Directory.CreateDirectory(cleanupDir);
+                        string marker = Path.Combine(cleanupDir, Guid.NewGuid().ToString("N") + ".txt");
+                        double started = cleanup.StartTime.ToUniversalTime().Subtract(new DateTime(1970, 1, 1)).TotalSeconds;
+                        File.WriteAllText(marker + ".tmp", cleanup.Id + " " + started.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        File.Move(marker + ".tmp", marker);
+                    }
+                }
             } catch {}
         }
     }
@@ -469,7 +479,9 @@ import subprocess
 import threading
 import psutil
 import json
+import ntpath
 import time
+import tempfile
 import random
 import struct
 import requests
@@ -480,9 +492,9 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QCheckBox, QLabel, QTextEdit, QLineEdit, QScrollArea,
     QMessageBox, QDialog, QInputDialog, QMenu, QFrame, QSizePolicy, QStyle,
-    QStackedWidget
+    QStackedWidget, QComboBox, QListWidget, QSystemTrayIcon
 )
-from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject, QLockFile
 from PySide6.QtGui import QCursor, QFont, QAction, QPainter, QColor, QIcon
 
 try:
@@ -497,6 +509,10 @@ os.makedirs(SAVE_FOLDER, exist_ok=True)
 HISTORY_FILE = os.path.join(SAVE_FOLDER, "history.json")
 SETTINGS_FILE = os.path.join(SAVE_FOLDER, "settings.json")
 RUNNING_TIMERS_FILE = os.path.join(SAVE_FOLDER, "running_timers.json")
+SCHEDULER_FILE = Path(SAVE_FOLDER) / "scheduler.json"
+CLEANUP_FOLDER = Path(SAVE_FOLDER) / "cleanup"
+# Timers generated by earlier releases do not publish cleanup process IDs.
+LEGACY_CLEANUP_GRACE = 3.0
 
 GIST_RAW_URL = "https://gist.githubusercontent.com/Enan511/680cf54a3f323ab3739fb12bc65639a3/raw/Ultimate_quests.txt"
 STEAMCMD_API_URL = "https://cmd.steamcmd.net/v1/info"
@@ -689,22 +705,6 @@ def resolve_path(path_str):
     return str(p)
 
 
-def truncate_path(path_str, max_chars=60):
-    '''Truncate path string.'''
-    if len(path_str) <= max_chars:
-        return path_str
-    parts = Path(path_str).parts
-    if len(parts) <= 3:
-        return path_str[:max_chars] + "..."
-    head = str(Path(parts[0]) / parts[1])
-    tail = str(Path(parts[-2]) / parts[-1])
-    sep = "\\" if "\\" in path_str else "/"
-    truncated = f"{head}{sep}...{sep}{tail}"
-    if len(truncated) <= max_chars:
-        return truncated
-    return f"...{sep}{parts[-2]}{sep}{parts[-1]}"
-
-
 def is_protected_directory(dir_path):
     '''Check if directory is a protected/system directory.'''
     try:
@@ -750,6 +750,44 @@ def safe_remove_empty_dir(dir_path):
 def normalize_path_key(path):
     '''Normalize path key.'''
     return os.path.normpath(path).lower()
+
+
+def game_search_rank(query, game_name, exe_path):
+    '''Return the match rank, or None when neither name matches.'''
+    filename = ntpath.basename(exe_path)
+    fields = (game_name.casefold(), filename.casefold(), ntpath.splitext(filename)[0].casefold())
+    query = query.casefold().strip()
+    if query in fields:
+        return 0
+
+    compact_query = ''.join(ch for ch in query if ch.isalnum())
+    compact_fields = [''.join(ch for ch in field if ch.isalnum()) for field in fields]
+    if compact_query and compact_query in compact_fields:
+        return 1
+    if any(query in field for field in fields) or (
+        compact_query and any(compact_query in field for field in compact_fields)
+    ):
+        return 2
+    return None
+
+
+def cleanup_is_running():
+    '''Check cleanup workers by PID and start time, including across app restarts.'''
+    pending = False
+    for marker in CLEANUP_FOLDER.glob("*.txt"):
+        try:
+            pid, started = marker.read_text(encoding="utf-8").split()
+            process = psutil.Process(int(pid))
+            if abs(process.create_time() - float(started)) < 1:
+                pending = True
+                continue
+        except psutil.AccessDenied:
+            pending = True
+            continue
+        except (psutil.NoSuchProcess, ValueError, FileNotFoundError):
+            pass
+        marker.unlink(missing_ok=True)
+    return pending
 
 
 def read_running_timers():
@@ -962,7 +1000,7 @@ class WorkerSignals(QObject):
     gist_check_empty = Signal()
     gist_check_error = Signal(str)
     steam_search_complete = Signal(list)
-    build_complete_trigger = Signal()
+    game_launch_finished = Signal(dict, bool, object, str)
 
 
 class ExeBuilderApp(QMainWindow):
@@ -981,6 +1019,13 @@ class ExeBuilderApp(QMainWindow):
         self._running_exes_cache = set()
         self._running_exes_cache_time = 0.0
         self._last_known_existence = {}
+        self.scheduler_state = self.load_scheduler()
+        self.scheduler_error = ""
+        self.scheduler_launching = False
+        self.launched_processes = {}
+        self.running_games = {}
+        self.queue_ready_at = time.monotonic() + LEGACY_CLEANUP_GRACE if self.queue else 0
+        self.quit_requested = False
 
         self.current_mode = "standard"  # "standard" or "steam"
         self.selected_steam_game = None
@@ -990,15 +1035,18 @@ class ExeBuilderApp(QMainWindow):
         self.signals.gist_check_empty.connect(self.handle_empty_quests)
         self.signals.gist_check_error.connect(self.handle_gist_error)
         self.signals.steam_search_complete.connect(self.handle_steam_results)
-        self.signals.build_complete_trigger.connect(self.refresh_lists)
+        self.signals.game_launch_finished.connect(self.finish_game_launch)
 
         self.settings = self.load_settings()
         self.setup_ui()
+        self.setup_tray()
         self.load_history()
+        self.refresh_queue()
 
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self.poll_running_processes)
         self.poll_timer.start(2000)
+        QTimer.singleShot(0, self.poll_running_processes)
 
     def load_settings(self):
         '''Load settings from disk.'''
@@ -1054,21 +1102,9 @@ class ExeBuilderApp(QMainWindow):
         self.check_quests_btn.setFixedHeight(35)
         self.check_quests_btn.setStyleSheet(STYLE_RERUN_BTN)
         self.check_quests_btn.setShortcut("Ctrl+N")
+        self.check_quests_btn.setToolTip("Check for new quests (Ctrl+N)")
         self.check_quests_btn.clicked.connect(self.start_gist_check_thread)
         top_bar.addWidget(self.check_quests_btn)
-
-        shortcut_icon = QLabel("!")
-        shortcut_icon.setFixedSize(18, 18)
-        shortcut_icon.setAlignment(Qt.AlignCenter)
-        shortcut_icon.setStyleSheet(
-            "background-color: #ffcc00; color: #121212; font-weight: bold; "
-            "border-radius: 9px; font-size: 12px;"
-        )
-        top_bar.addWidget(shortcut_icon)
-
-        shortcut_label = QLabel("Shortcut: Ctrl+N")
-        shortcut_label.setStyleSheet("font-size: 12px; color: #aaaaaa; background: transparent;")
-        top_bar.addWidget(shortcut_label)
 
         self.chk_always_ask = QCheckBox("Ask before adding")
         self.chk_always_ask.setChecked(self.settings["always_ask_for_new_quests"])
@@ -1177,21 +1213,34 @@ class ExeBuilderApp(QMainWindow):
         input_card_layout.addWidget(self.stacked_widget)
         central_layout.addWidget(input_frame)
 
-        # ── Search Filter Row ──
+        # Launch mode and local game search
         search_row = QHBoxLayout()
+        self.launch_mode = QComboBox()
+        self.launch_mode.addItem("Launcher Mode", "launcher")
+        self.launch_mode.addItem("Scheduler Mode", "scheduler")
+        self.launch_mode.setAccessibleName("Launch mode")
+        self.launch_mode.setCurrentIndex(self.launch_mode.findData(self.scheduler_state["mode"]))
+        self.launch_mode.currentIndexChanged.connect(self.change_launch_mode)
+        search_row.addWidget(self.launch_mode)
         search_row.addStretch()
         self.search_entry = QLineEdit()
-        self.search_entry.setPlaceholderText("Search by Game Name...")
-        self.search_entry.setFixedWidth(300)
+        self.search_entry.setPlaceholderText("Search game or executable name")
+        self.search_entry.setMaximumWidth(340)
+        self.search_entry.setClearButtonEnabled(True)
         self.search_entry.setFixedHeight(35)
         self.search_entry.textChanged.connect(self.refresh_lists)
         search_row.addWidget(self.search_entry)
         central_layout.addLayout(search_row)
 
+        lists_row = QHBoxLayout()
+        game_lists = QVBoxLayout()
+        lists_row.addLayout(game_lists, 3)
+        central_layout.addLayout(lists_row, 1)
+
         # ── Created Executable History List ──
         self.lbl_built = QLabel("Created Executable History")
         self.lbl_built.setStyleSheet("font-size: 15px; font-weight: bold; color: #00ffcc;")
-        central_layout.addWidget(self.lbl_built)
+        game_lists.addWidget(self.lbl_built)
 
         self.built_scroll = QScrollArea()
         self.built_scroll_widget = QWidget()
@@ -1201,13 +1250,13 @@ class ExeBuilderApp(QMainWindow):
         self.built_scroll_widget.setStyleSheet("background-color: #181818;")
         self.built_scroll.setWidgetResizable(True)
         self.built_scroll.setWidget(self.built_scroll_widget)
-        self.built_scroll.setFixedHeight(self._scroll_height_for_rows(1, max_rows=3))
-        central_layout.addWidget(self.built_scroll)
+        self.built_scroll.setMinimumHeight(self._scroll_height_for_rows(1))
+        game_lists.addWidget(self.built_scroll)
 
         # ── Game List (Unbuilt) ──
         self.lbl_unbuilt = QLabel("Game List")
         self.lbl_unbuilt.setStyleSheet("font-size: 15px; font-weight: bold; color: #ffcc00;")
-        central_layout.addWidget(self.lbl_unbuilt)
+        game_lists.addWidget(self.lbl_unbuilt)
 
         self.unbuilt_scroll = QScrollArea()
         self.unbuilt_scroll_widget = QWidget()
@@ -1217,11 +1266,252 @@ class ExeBuilderApp(QMainWindow):
         self.unbuilt_scroll_widget.setStyleSheet("background-color: #181818;")
         self.unbuilt_scroll.setWidgetResizable(True)
         self.unbuilt_scroll.setWidget(self.unbuilt_scroll_widget)
-        self.unbuilt_scroll.setFixedHeight(self._scroll_height_for_rows(5, max_rows=5))
-        central_layout.addWidget(self.unbuilt_scroll)
+        self.unbuilt_scroll.setMinimumHeight(self._scroll_height_for_rows(1))
+        game_lists.addWidget(self.unbuilt_scroll)
 
-        central_layout.addStretch()
+        game_lists.addStretch()
+        self.queue_panel = QWidget()
+        self.queue_panel.setMinimumWidth(215)
+        queue_layout = QVBoxLayout(self.queue_panel)
+        queue_layout.setContentsMargins(8, 0, 0, 0)
+        queue_title = QLabel("Launch Queue")
+        queue_title.setStyleSheet("font-size: 15px; font-weight: bold; color: #00ffcc;")
+        queue_layout.addWidget(queue_title)
+        self.queue_status = QLabel()
+        self.queue_status.setTextFormat(Qt.PlainText)
+        self.queue_status.setWordWrap(True)
+        queue_layout.addWidget(self.queue_status)
+        self.queue_list = QListWidget()
+        self.queue_list.setAccessibleName("Queued games")
+        self.queue_list.setMinimumHeight(60)
+        self.queue_list.currentRowChanged.connect(self.update_queue_controls)
+        queue_layout.addWidget(self.queue_list, 1)
+        queue_controls = QHBoxLayout()
+        self.queue_up_btn = QPushButton("Up")
+        self.queue_up_btn.clicked.connect(lambda: self.edit_queue(-1))
+        queue_controls.addWidget(self.queue_up_btn)
+        self.queue_down_btn = QPushButton("Down")
+        self.queue_down_btn.clicked.connect(lambda: self.edit_queue(1))
+        queue_controls.addWidget(self.queue_down_btn)
+        self.queue_remove_btn = QPushButton("Remove")
+        self.queue_remove_btn.clicked.connect(lambda: self.edit_queue(None))
+        queue_controls.addWidget(self.queue_remove_btn)
+        queue_layout.addLayout(queue_controls)
+        self.queue_pause_btn = QPushButton("Pause Queue")
+        self.queue_pause_btn.clicked.connect(self.toggle_queue_pause)
+        queue_layout.addWidget(self.queue_pause_btn)
+        lists_row.addWidget(self.queue_panel, 2)
+
         self.setCentralWidget(central_widget)
+
+    @property
+    def queue(self):
+        return self.scheduler_state["queue"]
+
+    @property
+    def scheduler_mode(self):
+        return self.scheduler_state["mode"] == "scheduler"
+
+    @staticmethod
+    def load_scheduler():
+        defaults = {"mode": "launcher", "paused": False, "queue": [], "failure": ""}
+        try:
+            state = json.loads(SCHEDULER_FILE.read_text(encoding="utf-8"))
+            if state["mode"] in ("launcher", "scheduler") and isinstance(state["queue"], list):
+                return {
+                    "mode": state["mode"],
+                    "paused": bool(state.get("paused", False)),
+                    "failure": state.get("failure") or "",
+                    "queue": [entry for entry in state["queue"] if isinstance(entry, dict)
+                              and isinstance(entry.get("exe_path"), str) and entry["exe_path"]],
+                }
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"Could not load the launch queue: {exc}")
+        return defaults
+
+    def save_scheduler(self, **changes):
+        state = {**self.scheduler_state, **changes}
+        temporary = SCHEDULER_FILE.with_suffix(".tmp")
+        try:
+            temporary.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(SCHEDULER_FILE)
+        except OSError as exc:
+            self.scheduler_error = f"Could not save the launch queue: {exc}"
+            self.statusBar().showMessage(self.scheduler_error, 10000)
+            return False
+        self.scheduler_state = state
+        self.scheduler_error = ""
+        return True
+
+    def setup_tray(self):
+        self.tray_icon = None
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        icon = self.windowIcon()
+        if icon.isNull():
+            icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        self.tray_icon.setToolTip("Ultimate Quest")
+        tray_menu = QMenu(self)
+        tray_menu.addAction("Open Ultimate Quest", self.restore_window)
+        tray_menu.addAction("Quit", self.quit_app)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self.tray_activated)
+
+    def tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self.restore_window()
+
+    def restore_window(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def quit_app(self):
+        self.quit_requested = True
+        if self.close():
+            QApplication.quit()
+
+    def closeEvent(self, event):
+        if self.scheduler_mode and not self.quit_requested and self.tray_icon:
+            self.hide()
+            event.ignore()
+            return
+        if self.scheduler_launching:
+            self.quit_requested = True
+            event.ignore()
+            return
+        if self.tray_icon:
+            self.tray_icon.hide()
+        super().closeEvent(event)
+
+    def change_launch_mode(self):
+        mode = self.launch_mode.currentData()
+        if not self.save_scheduler(mode=mode):
+            self.launch_mode.blockSignals(True)
+            self.launch_mode.setCurrentIndex(self.launch_mode.findData(self.scheduler_state["mode"]))
+            self.launch_mode.blockSignals(False)
+        self.refresh_queue()
+        self.refresh_lists()
+        self.advance_scheduler(self.get_running_exes(max_age=0))
+
+    def refresh_queue(self, selected=None):
+        self.queue_panel.setVisible(self.scheduler_mode)
+        if self.tray_icon:
+            self.tray_icon.setVisible(self.scheduler_mode)
+        if selected is None:
+            selected = self.queue_list.currentRow()
+        self.queue_list.clear()
+        for position, entry in enumerate(self.queue, 1):
+            filename = ntpath.basename(entry["exe_path"])
+            name = entry.get("game_name") or filename
+            self.queue_list.addItem(f"{position}. {name}\n{filename}")
+            self.queue_list.item(position - 1).setToolTip(entry["exe_path"])
+        if selected >= 0:
+            self.queue_list.setCurrentRow(min(selected, len(self.queue) - 1))
+        self.update_queue_controls()
+        self.update_queue_status()
+
+    def update_queue_controls(self):
+        selected = self.queue_list.currentRow()
+        first_editable = int(self.scheduler_launching)
+        self.queue_up_btn.setEnabled(first_editable < selected < len(self.queue))
+        self.queue_down_btn.setEnabled(first_editable <= selected < len(self.queue) - 1)
+        self.queue_remove_btn.setEnabled(first_editable <= selected < len(self.queue))
+        self.queue_pause_btn.setText("Resume Queue" if self.scheduler_state["paused"] else "Pause Queue")
+
+    def update_queue_status(self, waiting_for_cleanup=False):
+        if self.scheduler_error:
+            status = self.scheduler_error
+        elif self.scheduler_launching:
+            entry = self.queue[0]
+            status = f"Launching {entry.get('game_name') or ntpath.basename(entry['exe_path'])}…"
+        elif self.scheduler_state["paused"]:
+            status = self.scheduler_state["failure"] or "Queue paused"
+        elif waiting_for_cleanup:
+            status = "Waiting for game cleanup…"
+        else:
+            status = f"{len(self.queue)} queued" if self.queue else "No games queued"
+        if self.running_games:
+            names = ", ".join(sorted(set(self.running_games.values()), key=str.casefold))
+            status = f"Running {names}\n{status}"
+        self.queue_status.setText(status)
+
+    def toggle_queue_pause(self):
+        self.save_scheduler(paused=not self.scheduler_state["paused"], failure="")
+        self.update_queue_controls()
+        self.advance_scheduler(self.get_running_exes(max_age=0))
+
+    def edit_queue(self, offset):
+        selected = self.queue_list.currentRow()
+        first_editable = int(self.scheduler_launching)
+        if not first_editable <= selected < len(self.queue):
+            return
+        queue = self.queue.copy()
+        destination = selected if offset is None else selected + offset
+        if not first_editable <= destination < len(queue):
+            return
+        entry = queue.pop(selected)
+        if offset is not None:
+            queue.insert(destination, entry)
+        failure = self.scheduler_state["failure"] if queue and queue[0] is self.queue[0] else ""
+        self.save_scheduler(queue=queue, failure=failure)
+        self.refresh_queue(destination)
+
+    def enqueue_games(self, entries, allow_repeat=False):
+        queue = self.queue.copy()
+        positions = {}
+        for index, entry in enumerate(queue, 1):
+            positions.setdefault(normalize_path_key(resolve_path(entry["exe_path"])), index)
+        duplicate_position = None
+        for entry in entries:
+            key = normalize_path_key(resolve_path(entry["exe_path"]))
+            if key in positions and not allow_repeat:
+                duplicate_position = positions[key]
+                continue
+            queue.append(entry)
+            positions[key] = len(queue)
+        if len(queue) != len(self.queue):
+            self.save_scheduler(queue=queue)
+        elif duplicate_position is not None:
+            self.statusBar().showMessage(f"Already queued at position {duplicate_position}. Use Queue Again to repeat it.", 5500)
+        self.refresh_queue()
+        self.advance_scheduler(self.get_running_exes(max_age=0))
+
+    def advance_scheduler(self, running_exes):
+        with self._data_lock:
+            tracked = {normalize_path_key(resolve_path(entry["exe_path"])):
+                       entry.get("game_name") or ntpath.basename(entry["exe_path"])
+                       for entry in self.history + self.queue}
+        running = {path: tracked[path] for path in running_exes & tracked.keys()}
+        for process, entry in list(self.launched_processes.items()):
+            path = normalize_path_key(resolve_path(entry["exe_path"]))
+            if process.poll() is None:
+                running[path] = entry["game_name"]
+            else:
+                self.launched_processes.pop(process)
+                self.queue_ready_at = time.monotonic() + LEGACY_CLEANUP_GRACE
+        if self.running_games.keys() - running.keys():
+            self.queue_ready_at = time.monotonic() + LEGACY_CLEANUP_GRACE
+        self.running_games = running
+
+        waiting_for_cleanup = False
+        if (self.scheduler_mode and not self.scheduler_state["paused"] and self.queue
+                and not self.quit_requested and not self.scheduler_launching
+                and not running and not self.currently_building):
+            try:
+                waiting_for_cleanup = time.monotonic() < self.queue_ready_at or cleanup_is_running()
+            except OSError as exc:
+                self.update_queue_status()
+                self.queue_status.setText(f"Could not check game cleanup: {exc}")
+                return
+            if not waiting_for_cleanup:
+                self.scheduler_launching = True
+                self.start_game_launches([self.queue[0]], allow_build=True, scheduled=True)
+                self.update_queue_controls()
+        self.update_queue_status(waiting_for_cleanup)
 
     def toggle_mode(self):
         '''Toggle between Standard Mode and Steam Mode pages.'''
@@ -1303,7 +1593,7 @@ class ExeBuilderApp(QMainWindow):
         self.build_now_steam_btn.setStyleSheet(STYLE_BUILD_BTN)
 
     def build_steam_action(self):
-        '''Build the currently selected Steam game.'''
+        '''Register the selected Steam game and launch or queue it.'''
         if not self.selected_steam_game:
             QMessageBox.warning(self, "No Game to Build", "No game to build. Please search and select a valid Steam game first.")
             return
@@ -1311,85 +1601,146 @@ class ExeBuilderApp(QMainWindow):
         info = self.selected_steam_game
         game_name = info["name"]
         exe_path = info["target_rel"]
-        appid = info["appid"]
-        installdir = info["installdir"]
-
-        steam_path = get_steam_path()
-        manifest_path = None
-        if steam_path:
-            manifest_path = generate_appmanifest(appid, game_name, installdir, steam_path, info.get("depot_id"))
-
-        # Add to history
         with self._data_lock:
-            key = normalize_path_key(exe_path)
-            existing = {normalize_path_key(item["exe_path"]) for item in self.history}
-            if key not in existing:
-                self.history.append({
-                    "exe_path": exe_path,
-                    "root_dir": os.path.dirname(exe_path),
-                    "game_name": game_name,
-                    "ever_built": False,
-                    "manifest_path": manifest_path
-                })
+            key = normalize_path_key(resolve_path(exe_path))
+            entry = next((item for item in self.history
+                          if normalize_path_key(resolve_path(item["exe_path"])) == key), None)
+            if entry is None:
+                entry = {"exe_path": exe_path, "game_name": game_name, "ever_built": False}
+                self.history.append(entry)
+            entry["steam"] = {field: info.get(field) for field in ("appid", "installdir", "depot_id")}
         self.save_history()
+        self.request_game_launches([entry["exe_path"]])
 
-        self.build_item_with_manifest(exe_path, manifest_path)
+    def request_game_launches(self, paths, allow_build=True, allow_repeat=False):
+        with self._data_lock:
+            by_path = {normalize_path_key(resolve_path(item["exe_path"])): item.copy() for item in self.history}
+        keys = dict.fromkeys(normalize_path_key(resolve_path(path)) for path in paths)
+        entries = [by_path[key] for key in keys if key in by_path]
+        if not entries:
+            return
+        if self.scheduler_mode:
+            self.enqueue_games(entries, allow_repeat)
+            self.refresh_lists()
+        else:
+            entries = [entry for entry in entries if entry["exe_path"] not in self.currently_building]
+            if entries:
+                self.start_game_launches(entries, allow_build)
 
-    def build_item_with_manifest(self, exe_path, manifest_path=None):
-        '''Build item passing optional manifest path.'''
-        self.currently_building.add(exe_path)
+    def start_game_launches(self, entries, allow_build, scheduled=False):
+        self.currently_building.update(entry["exe_path"] for entry in entries)
         self.refresh_lists()
-        thread = threading.Thread(target=self.build_single_manifest_wrapper, args=(exe_path, manifest_path))
-        thread.daemon = True
-        thread.start()
+        threading.Thread(target=self.launch_games, args=(entries, allow_build, scheduled), daemon=True).start()
 
-    def build_single_manifest_wrapper(self, exe_path, manifest_path):
-        self.build_exe_logic_manifest(exe_path, manifest_path)
-        self.currently_building.discard(exe_path)
-        self.signals.build_complete_trigger.emit()
+    def launch_games(self, entries, allow_build, scheduled):
+        for entry in entries:
+            try:
+                process = self.prepare_and_launch(entry, allow_build)
+            except Exception as exc:
+                self.signals.game_launch_finished.emit(entry, scheduled, None, str(exc))
+            else:
+                self.signals.game_launch_finished.emit(entry, scheduled, process, "")
 
-    def build_exe_logic_manifest(self, full_path_str, manifest_path=None):
-        '''Core build logic supporting steam manifest file creation.'''
-        try:
-            original_path_str = full_path_str
-            resolved_path_str = resolve_path(full_path_str)
-            target_file = Path(resolved_path_str)
-            target_dir = target_file.parent
-            exe_name = target_file.name
+    def prepare_and_launch(self, entry, allow_build):
+        target = Path(resolve_path(entry["exe_path"]))
+        needs_build = not target.is_file()
+        if needs_build:
+            if not allow_build:
+                raise FileNotFoundError(f"Executable not found: {target}")
+            source = Path(resource_path("timer.exe"))
+            if not source.is_file():
+                raise FileNotFoundError("Bundled timer.exe not found")
+            target.parent.mkdir(parents=True, exist_ok=True)
 
-            target_dir.mkdir(parents=True, exist_ok=True)
+        manifest = self.prepare_steam_manifest(entry, target) if allow_build else None
+        if manifest:
+            target.with_name(f"{target.stem}_manifest.path").write_text(manifest, encoding="utf-8")
+        if needs_build:
+            build_random_icon_file(str(target.with_name(f"{target.stem}_icon.ico")))
+            with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as temp_file:
+                temporary = Path(temp_file.name)
+            try:
+                shutil.copyfile(source, temporary)
+                temporary.rename(target)
+            finally:
+                temporary.unlink(missing_ok=True)
 
-            timer_exe_src = resource_path("timer.exe")
-            full_exe_path = str(target_dir / exe_name)
-
-            if not os.path.exists(timer_exe_src):
-                raise FileNotFoundError("Bundled timer.exe not found!")
-
-            shutil.copy(timer_exe_src, full_exe_path)
-
-            icon_path = str(target_dir / (target_file.stem + "_icon.ico"))
-            icon_built = build_random_icon_file(icon_path)
-
-            if manifest_path:
-                manifest_ref = str(target_dir / (target_file.stem + "_manifest.path"))
-                with open(manifest_ref, "w", encoding="utf-8") as f:
-                    f.write(manifest_path)
-
-
+        if needs_build or manifest:
             with self._data_lock:
                 for item in self.history:
-                    if item["exe_path"] == original_path_str:
-                        item["root_dir"] = str(target_dir)
-                        item["ever_built"] = True
+                    if item["exe_path"] == entry["exe_path"]:
+                        item.update(root_dir=str(target.parent), ever_built=True)
+                        if manifest:
+                            item["manifest_path"] = manifest
+                        self.save_history()
                         break
-            self.save_history()
+        return subprocess.Popen([str(target)])
 
-            if os.path.exists(full_exe_path):
-                subprocess.Popen([full_exe_path])
+    def prepare_steam_manifest(self, entry, target):
+        steam = entry.get("steam")
+        recorded = entry.get("manifest_path")
+        if not steam:
+            if not recorded:
+                return None
+            manifest = Path(recorded)
+            if manifest.is_file():
+                return str(manifest)
+            # Older history saved the manifest path without the Steam search metadata.
+            appid = manifest.stem.removeprefix("appmanifest_")
+            if not appid.isdecimal():
+                return None
+            try:
+                installdir = target.relative_to(manifest.parent / "common").parts[0]
+            except (ValueError, IndexError):
+                return None
+            steam = {"appid": appid, "installdir": installdir}
+            steam_path = manifest.parent.parent
+        else:
+            steam_path = get_steam_path()
+            if steam_path is None:
+                return None
+            manifest = steam_path / "steamapps" / f"appmanifest_{steam['appid']}.acf"
+            if manifest.is_file():
+                reference = target.with_name(f"{target.stem}_manifest.path")
+                if recorded and normalize_path_key(recorded) == normalize_path_key(str(manifest)):
+                    return str(manifest)
+                if reference.is_file():
+                    referenced_path = reference.read_text(encoding="utf-8").strip()
+                    if normalize_path_key(referenced_path) == normalize_path_key(str(manifest)):
+                        return str(manifest)
+                return None
 
-        except Exception as e:
-            err_msg = str(e)
-            QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", f"Failed to build: {err_msg}"))
+        manifest_path = generate_appmanifest(steam["appid"], entry["game_name"], steam["installdir"],
+                                             steam_path, steam.get("depot_id"))
+        if not manifest_path:
+            raise OSError(f"Could not create Steam manifest: {manifest}")
+        return manifest_path
+
+    @Slot(dict, bool, object, str)
+    def finish_game_launch(self, entry, scheduled, process, error):
+        self.currently_building.discard(entry["exe_path"])
+        if process is not None:
+            self.launched_processes[process] = entry
+            self._running_exes_cache_time = 0
+
+        if scheduled:
+            self.scheduler_launching = False
+            if error:
+                failure = f"Queue paused. Could not launch {entry['game_name']}: {error}"
+                if not self.save_scheduler(paused=True, failure=failure):
+                    self.scheduler_state.update(paused=True, failure=failure)
+            else:
+                remaining = self.queue[1:]
+                if not self.save_scheduler(queue=remaining):
+                    self.scheduler_state.update(queue=remaining, paused=True)
+            self.refresh_queue()
+        elif error:
+            QMessageBox.critical(self, "Launch Failed", f"Could not launch {entry['game_name']}: {error}")
+        self.refresh_lists()
+        if self.quit_requested:
+            self.quit_app()
+        else:
+            self.advance_scheduler(self.get_running_exes())
 
     def toggle_always_ask(self, state):
         self.settings["always_ask_for_new_quests"] = (state == 2)
@@ -1599,9 +1950,8 @@ class ExeBuilderApp(QMainWindow):
                         "ever_built": False
                     })
                     added_paths.append(e_path)
-                elif trigger_build:
-                    if not os.path.exists(resolve_path(e_path)):
-                        added_paths.append(e_path)
+                elif trigger_build and (self.scheduler_mode or not os.path.exists(resolve_path(e_path))):
+                    added_paths.append(e_path)
 
         if valid_input:
             self.save_history()
@@ -1611,40 +1961,7 @@ class ExeBuilderApp(QMainWindow):
         return added_paths
 
     def build_now_action(self):
-        paths_to_build = self.add_bulk_games(trigger_build=True)
-        if paths_to_build:
-            for p in paths_to_build:
-                self.currently_building.add(p)
-            self.refresh_lists()
-            thread = threading.Thread(target=self.build_multiple_exes, args=(paths_to_build,))
-            thread.daemon = True
-            thread.start()
-
-    def build_multiple_exes(self, paths):
-        for path in paths:
-            self.build_exe_logic_manifest(path)
-            self.currently_building.discard(path)
-            self.signals.build_complete_trigger.emit()
-
-    def build_item(self, exe_path):
-        self.currently_building.add(exe_path)
-        self.refresh_lists()
-        thread = threading.Thread(target=self.build_single_wrapper, args=(exe_path,))
-        thread.daemon = True
-        thread.start()
-
-    def build_single_wrapper(self, exe_path):
-        self.build_exe_logic_manifest(exe_path)
-        self.currently_building.discard(exe_path)
-        self.signals.build_complete_trigger.emit()
-
-    def rerun_item(self, exe_path):
-        resolved = resolve_path(exe_path)
-        if os.path.exists(resolved):
-            try:
-                subprocess.Popen([resolved])
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not launch: {e}")
+        self.request_game_launches(self.add_bulk_games(trigger_build=True))
 
     def delete_tracked_item(self, exe_path):
         with self._data_lock:
@@ -1702,7 +2019,7 @@ class ExeBuilderApp(QMainWindow):
             try:
                 exe_path = p.info.get('exe')
                 if exe_path:
-                    running.add(os.path.normpath(os.path.abspath(exe_path)))
+                    running.add(normalize_path_key(os.path.abspath(exe_path)))
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
 
@@ -1718,10 +2035,19 @@ class ExeBuilderApp(QMainWindow):
                 widget.deleteLater()
 
     def refresh_lists(self):
-        search_query = self.search_entry.text().lower().strip()
+        search_query = self.search_entry.text().strip()
+        build_label = "Add to Queue" if self.scheduler_mode else "Build Now"
+        self.build_now_std_btn.setText(build_label)
+        self.build_now_steam_btn.setText(build_label)
         with self._data_lock:
-            self.history.sort(key=lambda x: x.get("game_name", "").lower())
-            history_snapshot = list(self.history)
+            history_snapshot = sorted(self.history, key=lambda item: item.get("game_name", "").casefold())
+        if search_query:
+            matches = []
+            for item in history_snapshot:
+                rank = game_search_rank(search_query, item.get("game_name", ""), item["exe_path"])
+                if rank is not None:
+                    matches.append((rank, item))
+            history_snapshot = [item for _, item in sorted(matches, key=lambda match: match[0])]
 
         self.clear_layout(self.built_scroll_layout)
         self.clear_layout(self.unbuilt_scroll_layout)
@@ -1736,9 +2062,6 @@ class ExeBuilderApp(QMainWindow):
             g_name = item.get("game_name", "Unknown Game")
             ever_built = item.get("ever_built", False)
 
-            if search_query and search_query not in g_name.lower():
-                continue
-
             resolved_exe = resolve_path(exe_path)
             exists = os.path.exists(resolved_exe)
             parent_layout = self.built_scroll_layout if exists else self.unbuilt_scroll_layout
@@ -1752,8 +2075,11 @@ class ExeBuilderApp(QMainWindow):
             frame_layout = QHBoxLayout(item_frame)
             frame_layout.setContentsMargins(10, 6, 10, 6)
 
-            display_path = truncate_path(exe_path)
-            lbl = QLabel(f"[{g_name}]  -  {display_path}")
+            filename = ntpath.basename(exe_path)
+            lbl = QLabel(f"{g_name}\n{filename}")
+            lbl.setTextFormat(Qt.PlainText)
+            lbl.setToolTip(exe_path)
+            lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             lbl.setStyleSheet("font-size: 13px; font-weight: normal; background: transparent;")
             frame_layout.addWidget(lbl, stretch=1)
 
@@ -1773,10 +2099,10 @@ class ExeBuilderApp(QMainWindow):
                 btn_row.setContentsMargins(0, 0, 0, 0)
                 btn_row.setSpacing(5)
 
-                btn_rerun = QPushButton("Rerun")
+                btn_rerun = QPushButton("Queue" if self.scheduler_mode else "Rerun")
                 btn_rerun.setFixedWidth(80)
                 btn_rerun.setStyleSheet(STYLE_RERUN_BTN)
-                btn_rerun.clicked.connect(lambda checked=False, p=exe_path: self.rerun_item(p))
+                btn_rerun.clicked.connect(lambda checked=False, p=exe_path: self.request_game_launches([p], allow_build=False))
                 btn_row.addWidget(btn_rerun)
 
                 btn_del = QPushButton("Delete Path")
@@ -1785,13 +2111,17 @@ class ExeBuilderApp(QMainWindow):
                 btn_del.clicked.connect(lambda checked=False, p=exe_path: self.delete_tracked_item(p))
                 btn_row.addWidget(btn_del)
 
-                is_running = os.path.normpath(resolved_exe) in running_exes
+                is_running = normalize_path_key(resolved_exe) in running_exes
                 if is_running:
                     btn_del.setEnabled(False)
                     btn_del.setText("Running...")
                     btn_del.setStyleSheet(STYLE_DISABLED_BTN)
+                    if not self.scheduler_mode:
+                        btn_rerun.setEnabled(False)
+                        btn_rerun.setStyleSheet(STYLE_DISABLED_BTN)
+                if exe_path in self.currently_building:
+                    btn_del.setEnabled(False)
                     btn_rerun.setEnabled(False)
-                    btn_rerun.setStyleSheet(STYLE_DISABLED_BTN)
 
                 frame_layout.addWidget(btn_frame)
                 self.ui_items[exe_path] = {
@@ -1809,10 +2139,11 @@ class ExeBuilderApp(QMainWindow):
                     btn_build.setEnabled(False)
                     btn_build.setStyleSheet(STYLE_DISABLED_BTN)
                 else:
-                    btn_build = QPushButton("Rebuild" if ever_built else "Build")
+                    label = "Queue" if self.scheduler_mode else "Rebuild" if ever_built else "Build"
+                    btn_build = QPushButton(label)
                     btn_build.setFixedWidth(100)
                     btn_build.setStyleSheet(STYLE_BUILD_BTN)
-                    btn_build.clicked.connect(lambda checked=False, p=exe_path: self.build_item(p))
+                    btn_build.clicked.connect(lambda checked=False, p=exe_path: self.request_game_launches([p]))
                 frame_layout.addWidget(btn_build)
 
                 self.ui_items[exe_path] = {
@@ -1825,8 +2156,8 @@ class ExeBuilderApp(QMainWindow):
             parent_layout.addWidget(item_frame)
 
         built_h, unbuilt_h = self._compute_scroll_heights(built_count, unbuilt_count)
-        self.built_scroll.setFixedHeight(built_h)
-        self.unbuilt_scroll.setFixedHeight(unbuilt_h)
+        self.built_scroll.setMaximumHeight(built_h)
+        self.unbuilt_scroll.setMaximumHeight(unbuilt_h)
 
     def show_context_menu(self, pos, exe_path):
         menu = QMenu(self)
@@ -1845,6 +2176,11 @@ class ExeBuilderApp(QMainWindow):
         menu.addAction(act_copy)
 
         menu.addSeparator()
+
+        if self.scheduler_mode:
+            act_repeat = QAction("Queue Again", menu)
+            act_repeat.triggered.connect(lambda: self.request_game_launches([exe_path], allow_repeat=True))
+            menu.addAction(act_repeat)
 
         act_del = QAction("Delete from History", self)
         act_del.triggered.connect(lambda: self.delete_from_history(exe_path))
@@ -1869,7 +2205,7 @@ class ExeBuilderApp(QMainWindow):
 
     def delete_from_history(self, exe_path):
         resolved_exe = resolve_path(exe_path)
-        if os.path.normpath(resolved_exe) in self.get_running_exes():
+        if exe_path in self.currently_building or normalize_path_key(resolved_exe) in self.get_running_exes():
             QMessageBox.warning(self, "Game Running", "Game is currently running. Close the exe and retry.")
             return
 
@@ -1913,7 +2249,7 @@ class ExeBuilderApp(QMainWindow):
 
     def poll_running_processes(self):
         running_exes = self.get_running_exes()
-        running_timers = read_running_timers()
+        running_timers = {normalize_path_key(path): info for path, info in read_running_timers().items()}
         needs_refresh = False
 
         with self._data_lock:
@@ -1937,15 +2273,16 @@ class ExeBuilderApp(QMainWindow):
                 if exists_on_disk != is_built_state or not exists_on_disk:
                     continue
 
-                normalized_target = os.path.normpath(resolved_exe)
+                normalized_target = normalize_path_key(resolved_exe)
                 is_running = normalized_target in running_exes
 
                 if is_running and not data["is_running"]:
                     data["btn_delete"].setEnabled(False)
                     data["btn_delete"].setText("Running...")
                     data["btn_delete"].setStyleSheet(STYLE_DISABLED_BTN)
-                    data["btn_rerun"].setEnabled(False)
-                    data["btn_rerun"].setStyleSheet(STYLE_DISABLED_BTN)
+                    if not self.scheduler_mode:
+                        data["btn_rerun"].setEnabled(False)
+                        data["btn_rerun"].setStyleSheet(STYLE_DISABLED_BTN)
                     data["is_running"] = True
                 elif not is_running and data["is_running"]:
                     data["btn_delete"].setEnabled(True)
@@ -1972,10 +2309,20 @@ class ExeBuilderApp(QMainWindow):
 
         if needs_refresh:
             self.refresh_lists()
+        self.advance_scheduler(running_exes)
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(resource_path("icons/UQ.ico")))
+    app_lock = QLockFile(str(Path(SAVE_FOLDER) / "ultimate-quest.lock"))
+    app_lock.setStaleLockTime(0)
+    if not app_lock.tryLock(0):
+        if app_lock.error() == QLockFile.LockFailedError:
+            QMessageBox.information(None, "Ultimate Quest", "Ultimate Quest is already running. Check the system tray.")
+            sys.exit(0)
+        QMessageBox.critical(None, "Ultimate Quest", "Could not lock the application data folder.")
+        sys.exit(1)
     app.setStyleSheet(DARK_THEME)
     window = ExeBuilderApp()
     window.show()

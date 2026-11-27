@@ -10,6 +10,7 @@ Ultimate_Quest_Setup.exe
 *.exe
 !rcedit.exe
 *.ico
+!assets/UQ.ico
 *.bat
 *.egg-info/
 .eggs/

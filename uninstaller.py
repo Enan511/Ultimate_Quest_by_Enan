@@ -310,6 +310,11 @@ class UninstallerApp(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    if getattr(sys, "frozen", False):
+        icon_path = Path(sys._MEIPASS) / "icons" / "UQ.ico"
+    else:
+        icon_path = Path(__file__).resolve().parent / "assets" / "UQ.ico"
+    app.setWindowIcon(QIcon(str(icon_path)))
     app.setStyleSheet(DARK_THEME)
     win = UninstallerApp()
     win.show()

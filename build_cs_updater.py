@@ -10,7 +10,7 @@ import zipfile
 import subprocess
 import shutil
 
-MAIN_ICON_SRC = r"D:\ML practice\Icons\UQ.ico"
+MAIN_ICON_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "UQ.ico")
 
 CS_CODE = r"""
 using System;

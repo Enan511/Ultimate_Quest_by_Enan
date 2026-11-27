@@ -9,6 +9,8 @@ A modern PySide6 desktop application designed for Discord Quest game spoofing an
 - **Standard Quest Spoofing** — Add games via bulk text input or sync with remote Gist quest lists.
 - **Steam Quest Mode** — Integrated Steam Store search (`store.steampowered.com/api/storesearch/`) and SteamCMD API metadata extraction. Automatically generates fake `appmanifest_<appid>.acf` files (`StateFlags 1026`) in `Steam/steamapps/` for advanced quest validation (e.g., *Marathon*, *Toxic Commando Demo*).
 - **Morphing Card UI** — PySide6 `QStackedWidget` interface cleanly toggles upper section between Standard Mode and Steam Mode views without UI clutter.
+- **Launcher and Scheduler Modes** — Launch games immediately or add them to a saved queue. The next game starts after tracked game processes exit and their cleanup finishes.
+- **Game List Search** — Filter the local game list and executable history by game title or executable filename. Exact matches appear first in each list.
 - **Ultra-Lightweight C# Countdown Timer** — Compiles a native 18 KB dark-mode C# timer executable (`timer.exe`) with 0 ms launch time, real-time countdown display, and preference toggles.
 - **Interactive Manual Exit Protocol** — Custom exit confirmation dialog (*"Do you want to delete game files upon closing?"*) featuring **Yes** (Green: deletes files + closes game) and **No** (Red: closes game without deleting files) controls, along with an `"Ask every time before closing"` preference toggle inside the timer window.
 - **Safe Dynamic Cleanup** — Targeted file-level cleanup with non-recursive directory pruning and protected system folder safeguards (prevents accidental deletion of parent directories or installed apps).
@@ -18,6 +20,13 @@ A modern PySide6 desktop application designed for Discord Quest game spoofing an
   - **Lightweight Setup (`UQ Setup_Light.exe`)** — Solid LZMA2 compressed installer (~46 MB) for fast downloads.
 
 ---
+
+## Using the Launch Queue
+
+1. Choose **Scheduler Mode** beside the local search field. You can queue games from Standard Mode, Steam Mode, or the game lists.
+2. Use **Up**, **Down**, and **Remove** to edit the queue. Right-click a game and choose **Queue Again** to add an intentional repeat. The queue has no preset size limit.
+3. Use **Pause Queue** to suspend automatic launches. Switching to **Launcher Mode** also suspends the queue and leaves the current game running.
+4. Close the main window in Scheduler Mode to keep Ultimate Quest running in the Windows system tray. To exit, choose **Quit** from the tray. Pending games are saved and can continue when you reopen the app.
 
 ## Requirements
 
@@ -65,6 +74,8 @@ python build_cs_updater.py
 ---
 
 ## Installation & Setup
+
+Download `Ultimate_Quest_Setup.exe` from [GitHub Releases](https://github.com/Enan511/Ultimate_Quest_by_Enan/releases/latest).
 
 1. Run `Ultimate_Quest_Setup.exe` (Full) or `UQ Setup_Light.exe` (Compact).
 2. Select your preferred installation directory (defaults to `%LOCALAPPDATA%\UEQuest by E`).

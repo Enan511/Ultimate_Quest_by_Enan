@@ -12,7 +12,7 @@ import tarfile
 import subprocess
 import shutil
 
-MAIN_ICON_SRC = r"D:\ML practice\Icons\UQ.ico"
+MAIN_ICON_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "UQ.ico")
 
 
 def run_pyinstaller(cmd, step_name):
@@ -56,19 +56,11 @@ def main():
     payload_size_mb = os.path.getsize(payload_path) / (1024 * 1024)
     print(f"  Solid LZMA2 payload compressed size: {payload_size_mb:.2f} MB")
 
-    # 3. Prepare icons
-    os.makedirs("icons", exist_ok=True)
-    if os.path.exists(MAIN_ICON_SRC):
-        shutil.copy(MAIN_ICON_SRC, os.path.join("icons", "UQ.ico"))
-        shutil.copy(MAIN_ICON_SRC, "uq.ico")
-
-    main_icon_arg = []
-    if os.path.exists("uq.ico"):
-        main_icon_arg = ["--icon", os.path.abspath("uq.ico")]
+    main_icon_arg = ["--icon", MAIN_ICON_SRC]
 
     add_data_args = [
         "--add-data", f"{payload_path}{os.pathsep}.",
-        "--add-data", f"icons{os.pathsep}icons"
+        "--add-data", f"{MAIN_ICON_SRC}{os.pathsep}icons"
     ]
 
     exclusions = [
@@ -99,7 +91,7 @@ def main():
         print(f"\nSUCCESS! Solid LZMA2 Setup Executable created: UQ Setup_Light.exe ({final_size_mb:.2f} MB)")
 
     # Cleanup temporary files
-    for file in ["uq.ico", "payload.tar.xz", "setup_installer_light.spec", "UQ Setup_Light.spec"]:
+    for file in ["payload.tar.xz", "setup_installer_light.spec", "UQ Setup_Light.spec"]:
         if os.path.exists(file):
             os.remove(file)
     for folder in ["build", "dist", light_folder]:

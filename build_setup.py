@@ -10,7 +10,7 @@ import os
 import subprocess
 import shutil
 
-MAIN_ICON_SRC = r"D:\ML practice\Icons\UQ.ico"
+MAIN_ICON_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "UQ.ico")
 
 
 def run_pyinstaller(cmd, step_name):
@@ -32,18 +32,11 @@ def main():
         print("ERROR: Ultimate_Quest_Folder not found. Run UltimateQuestbyENAN.py first!")
         sys.exit(1)
 
-    os.makedirs("icons", exist_ok=True)
-    if os.path.exists(MAIN_ICON_SRC):
-        shutil.copy(MAIN_ICON_SRC, os.path.join("icons", "UQ.ico"))
-        shutil.copy(MAIN_ICON_SRC, "uq.ico")
-
-    main_icon_arg = []
-    if os.path.exists("uq.ico"):
-        main_icon_arg = ["--icon", os.path.abspath("uq.ico")]
+    main_icon_arg = ["--icon", MAIN_ICON_SRC]
 
     add_data_args = [
         "--add-data", f"Ultimate_Quest_Folder{os.pathsep}Ultimate_Quest_Folder",
-        "--add-data", f"icons{os.pathsep}icons"
+        "--add-data", f"{MAIN_ICON_SRC}{os.pathsep}icons"
     ]
 
     exclusions = [
@@ -69,7 +62,7 @@ def main():
         shutil.copy(os.path.join("dist", "Ultimate_Quest_Setup.exe"), "Ultimate_Quest_Setup.exe")
         print("\nSUCCESS! Standalone Setup Executable created: Ultimate_Quest_Setup.exe")
 
-    for file in ["uq.ico", "setup_installer.spec", "Ultimate_Quest_Setup.spec"]:
+    for file in ["setup_installer.spec", "Ultimate_Quest_Setup.spec"]:
         if os.path.exists(file):
             os.remove(file)
     for folder in ["build", "dist"]:
